@@ -128,6 +128,7 @@ mod tests {
             match &selected.action {
                 Action::Idle => idle_count += 1,
                 Action::Move(_) => move_count += 1,
+                Action::Communicate(_) => {} // Not used in this test
             }
         }
 

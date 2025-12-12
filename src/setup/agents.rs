@@ -10,7 +10,7 @@ use crate::components::agent::{
     Agent, AgentId, AgentName, Alive, FoodSecurity, Goals, Needs, Role, SocialBelonging, Traits,
 };
 use crate::components::faction::FactionMembership;
-use crate::components::social::{Relationship, RelationshipGraph, Trust};
+use crate::components::social::{Memory, MemoryBank, MemoryValence, Relationship, RelationshipGraph, Trust};
 use crate::components::world::Position;
 use crate::systems::perception::VisibleAgents;
 
@@ -197,6 +197,92 @@ pub fn initialize_faction_relationships(
     }
 }
 
+/// Initialize seed memories for agents
+/// Gives each agent some memories about faction mates so gossip can start
+fn initialize_seed_memories(
+    world: &mut World,
+    all_faction_agents: &[(String, Vec<(String, String, Role)>)],
+    rng: &mut SmallRng,
+) {
+    let mut memory_bank = world.remove_resource::<MemoryBank>()
+        .unwrap_or_else(MemoryBank::new);
+
+    // Memory templates for positive impressions about faction mates
+    let positive_templates = [
+        "is a reliable worker",
+        "helped with the harvest",
+        "defended our territory",
+        "shared supplies during hard times",
+        "spoke well of our faction",
+        "showed courage in a dispute",
+    ];
+
+    // Memory templates for neutral observations
+    let neutral_templates = [
+        "arrived from the north road",
+        "was seen at the crossroads",
+        "attended the last ritual",
+        "spoke with traders",
+        "worked in the fields",
+    ];
+
+    // Memory templates for negative impressions (less common)
+    let negative_templates = [
+        "was overheard complaining",
+        "missed their work duties",
+        "argued with others",
+        "seemed secretive",
+    ];
+
+    for (faction_id, agents) in all_faction_agents {
+        // Each agent gets 1-3 memories about faction mates
+        for (agent_id, _agent_name, _role) in agents {
+            let memory_count: usize = rng.gen_range(1..=3);
+
+            for _ in 0..memory_count {
+                // Pick a random faction mate as subject
+                let subject_idx = rng.gen_range(0..agents.len());
+                let (subject_id, subject_name, _) = &agents[subject_idx];
+
+                // Don't have memories about self
+                if subject_id == agent_id {
+                    continue;
+                }
+
+                // Determine valence (70% neutral, 20% positive, 10% negative)
+                let roll: f32 = rng.gen();
+                let (template, valence, emotional_weight) = if roll < 0.7 {
+                    let idx = rng.gen_range(0..neutral_templates.len());
+                    (neutral_templates[idx], MemoryValence::Neutral, rng.gen_range(0.2..0.4))
+                } else if roll < 0.9 {
+                    let idx = rng.gen_range(0..positive_templates.len());
+                    (positive_templates[idx], MemoryValence::Positive, rng.gen_range(0.3..0.6))
+                } else {
+                    let idx = rng.gen_range(0..negative_templates.len());
+                    (negative_templates[idx], MemoryValence::Negative, rng.gen_range(0.3..0.5))
+                };
+
+                let memory_id = memory_bank.generate_id();
+                let content = format!("{} {}", subject_name, template);
+
+                let memory = Memory::firsthand(
+                    &memory_id,
+                    format!("seed_memory_{}", faction_id),
+                    subject_id,
+                    &content,
+                    emotional_weight,
+                    0, // tick 0
+                    valence,
+                );
+
+                memory_bank.add_memory(agent_id, memory);
+            }
+        }
+    }
+
+    world.insert_resource(memory_bank);
+}
+
 /// Spawn all agents for all factions and set up relationships
 pub fn spawn_all_agents(
     world: &mut World,
@@ -239,6 +325,9 @@ pub fn spawn_all_agents(
     }
 
     world.insert_resource(relationship_graph);
+
+    // Initialize seed memories for agents so they have something to share
+    initialize_seed_memories(world, &all_faction_agents, rng);
 
     // Update faction member counts and leader/reader assignments
     {

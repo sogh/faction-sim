@@ -6,15 +6,21 @@ use bevy_ecs::prelude::*;
 use std::collections::HashMap;
 
 use crate::actions::movement::{MoveAction, MovementType};
-use crate::components::agent::{AgentId, FoodSecurity, Needs, Role, SocialBelonging};
+use crate::actions::communication::{CommunicationAction, CommunicationType, TargetMode};
+use crate::components::agent::{AgentId, AgentName, FoodSecurity, Needs, Role, SocialBelonging, Traits};
 use crate::components::faction::{FactionMembership, FactionRegistry};
+use crate::components::social::{MemoryBank, RelationshipGraph};
 use crate::components::world::{LocationRegistry, Position};
+use crate::systems::perception::AgentsByLocation;
+use crate::systems::memory::get_most_interesting_memory;
 
 /// Enum representing all possible actions an agent can take
 #[derive(Debug, Clone)]
 pub enum Action {
     /// Move to an adjacent location
     Move(MoveAction),
+    /// Communicate with other agents
+    Communicate(CommunicationAction),
     /// Stay at current location (default/idle action)
     Idle,
 }
@@ -184,6 +190,102 @@ pub fn generate_patrol_actions(
                     format!("patrol to {}", adjacent_id),
                 ),
             );
+        }
+    }
+}
+
+/// System to generate communication actions for agents
+///
+/// Generates share_memory actions when:
+/// - Agent has interesting memories to share
+/// - There are other agents at the same location
+pub fn generate_communication_actions(
+    world_state: Res<crate::components::world::WorldState>,
+    agents_by_location: Res<AgentsByLocation>,
+    memory_bank: Res<MemoryBank>,
+    relationship_graph: Res<RelationshipGraph>,
+    mut pending_actions: ResMut<PendingActions>,
+    query: Query<(&AgentId, &AgentName, &Position, &FactionMembership, &Traits, &Needs)>,
+) {
+    // Build a map of agent_id -> (name, faction_id) for target info
+    let agent_info: HashMap<String, (String, String)> = query
+        .iter()
+        .map(|(id, name, _, membership, _, _)| {
+            (id.0.clone(), (name.0.clone(), membership.faction_id.clone()))
+        })
+        .collect();
+
+    for (agent_id, _name, position, membership, traits, _needs) in query.iter() {
+        // Get agents at the same location
+        let nearby_agents: Vec<String> = agents_by_location.at_location(&position.location_id).to_vec();
+
+        // Skip if alone
+        if nearby_agents.len() <= 1 {
+            continue;
+        }
+
+        // Check if this agent has interesting memories to share
+        let interesting_memory = get_most_interesting_memory(
+            &memory_bank,
+            &agent_id.0,
+            world_state.current_tick,
+        );
+
+        if let Some(memory) = interesting_memory {
+            // Generate share actions for each nearby agent
+            for target_id in &nearby_agents {
+                if target_id == &agent_id.0 {
+                    continue;
+                }
+
+                let Some((target_name, target_faction)) = agent_info.get(target_id) else {
+                    continue;
+                };
+
+                // Determine target mode based on group_preference
+                let target_mode = if traits.group_preference > 0.7 && nearby_agents.len() >= 4 {
+                    TargetMode::Group
+                } else {
+                    TargetMode::Individual
+                };
+
+                // Base weight for gossip (from behavioral rules)
+                let base_weight = 0.4;
+
+                // Determine reason based on memory valence
+                let reason = match memory.valence {
+                    crate::components::social::MemoryValence::Negative => {
+                        format!("share negative gossip about {} with {}", memory.subject, target_name)
+                    }
+                    crate::components::social::MemoryValence::Positive => {
+                        format!("share good news about {} with {}", memory.subject, target_name)
+                    }
+                    crate::components::social::MemoryValence::Neutral => {
+                        format!("share information about {} with {}", memory.subject, target_name)
+                    }
+                };
+
+                let action = CommunicationAction::share_memory(
+                    &agent_id.0,
+                    target_id,
+                    &memory.memory_id,
+                    target_mode,
+                );
+
+                pending_actions.add(
+                    &agent_id.0,
+                    WeightedAction::new(
+                        Action::Communicate(action),
+                        base_weight,
+                        reason,
+                    ),
+                );
+
+                // If targeting group, only add one action
+                if target_mode == TargetMode::Group {
+                    break;
+                }
+            }
         }
     }
 }

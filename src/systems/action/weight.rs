@@ -5,8 +5,10 @@
 use bevy_ecs::prelude::*;
 
 use crate::actions::movement::MovementType;
+use crate::actions::communication::{CommunicationType, TargetMode, communication_weights};
 use crate::components::agent::{AgentId, FoodSecurity, Needs, Role, SocialBelonging, Traits};
-use crate::components::faction::FactionMembership;
+use crate::components::faction::{FactionMembership, FactionRegistry};
+use crate::components::social::{MemoryValence, RelationshipGraph};
 use crate::components::world::Position;
 
 use super::generate::{Action, PendingActions, WeightedAction};
@@ -47,8 +49,58 @@ fn calculate_weight_modifier(
         Action::Move(move_action) => {
             calculate_movement_modifier(move_action.movement_type, traits, needs, membership)
         }
+        Action::Communicate(comm_action) => {
+            calculate_communication_modifier(comm_action, traits, needs, membership)
+        }
         Action::Idle => calculate_idle_modifier(traits, needs),
     }
+}
+
+/// Calculate communication action weight modifier
+fn calculate_communication_modifier(
+    action: &crate::actions::communication::CommunicationAction,
+    traits: &Traits,
+    needs: &Needs,
+    _membership: &FactionMembership,
+) -> f32 {
+    let mut modifier = 1.0;
+
+    match action.communication_type {
+        CommunicationType::ShareMemory | CommunicationType::SpreadRumor => {
+            // Sociability is the primary driver of gossip
+            // At sociability=1.0, bonus is +0.4 (from behavioral rules)
+            modifier *= 0.6 + traits.sociability * communication_weights::SOCIABILITY_BONUS;
+
+            // Isolated agents might gossip more to try to connect
+            if needs.social_belonging == SocialBelonging::Isolated {
+                modifier *= 1.3;
+            }
+
+            // Group communication is faster but shallower
+            if action.target_mode == TargetMode::Group {
+                modifier *= 0.8; // Slightly prefer individual
+            }
+        }
+        CommunicationType::Lie => {
+            // Lies are primarily driven by low honesty
+            // Weight scales inversely with honesty
+            modifier *= 1.5 - traits.honesty;
+
+            // Bold agents lie more
+            modifier *= 0.7 + traits.boldness * 0.6;
+        }
+        CommunicationType::Confess => {
+            // Confessions are driven by high honesty
+            modifier *= 0.5 + traits.honesty;
+
+            // Integrated agents confess more (trust the group)
+            if needs.social_belonging == SocialBelonging::Integrated {
+                modifier *= 1.5;
+            }
+        }
+    }
+
+    modifier
 }
 
 /// Calculate movement action weight modifier

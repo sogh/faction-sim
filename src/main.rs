@@ -18,13 +18,14 @@ mod output;
 mod setup;
 
 use systems::{
-    AgentsByLocation, InteractionTracker, RitualAttendance,
+    AgentsByLocation, InteractionTracker, RitualAttendance, SeasonTracker,
     build_location_index, update_perception,
     update_food_security, update_social_belonging, decay_interaction_counts,
+    decay_memories, cleanup_memories,
     PendingActions, SelectedActions, TickEvents,
-    generate_movement_actions, generate_patrol_actions,
+    generate_movement_actions, generate_patrol_actions, generate_communication_actions,
     apply_trait_weights, add_noise_to_weights, select_actions,
-    execute_movement_actions,
+    execute_movement_actions, execute_communication_actions,
 };
 
 pub use components::*;
@@ -123,6 +124,7 @@ fn main() {
     world.insert_resource(AgentsByLocation::new());
     world.insert_resource(InteractionTracker::new());
     world.insert_resource(RitualAttendance::new());
+    world.insert_resource(SeasonTracker::new());
 
     // Initialize action resources
     world.insert_resource(PendingActions::new());
@@ -180,21 +182,29 @@ fn main() {
         decay_interaction_counts,
     ).after(update_perception));
 
-    // Action systems run after needs
+    // Memory systems run after needs (decay is per-season, cleanup is periodic)
+    schedule.add_systems((
+        decay_memories,
+        cleanup_memories,
+    ).after(decay_interaction_counts));
+
+    // Action systems run after memory
     // 1. Generate possible actions
     // 2. Apply trait-based weight modifiers
     // 3. Add noise for variety
     // 4. Select action probabilistically
-    // 5. Execute selected action
+    // 5. Execute selected actions
     schedule.add_systems((
         generate_movement_actions,
         generate_patrol_actions,
-    ).after(decay_interaction_counts));
+        generate_communication_actions,
+    ).after(cleanup_memories));
 
     schedule.add_systems(
         apply_trait_weights
             .after(generate_movement_actions)
             .after(generate_patrol_actions)
+            .after(generate_communication_actions)
     );
 
     schedule.add_systems(
@@ -205,9 +215,11 @@ fn main() {
         select_actions.after(add_noise_to_weights)
     );
 
-    schedule.add_systems(
-        execute_movement_actions.after(select_actions)
-    );
+    // Execute all actions after selection
+    schedule.add_systems((
+        execute_movement_actions,
+        execute_communication_actions,
+    ).after(select_actions));
 
     println!();
     println!("Starting simulation...");
