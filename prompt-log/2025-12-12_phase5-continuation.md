@@ -193,3 +193,53 @@ User requested to continue implementation. This session picked up from where con
 
 ### Next Steps
 Ready for commit of Phase 7, then continue with remaining implementation phases.
+
+---
+
+## Phase 8: Tension Detection System
+
+### User Request
+Continue implementation from previous context continuation.
+
+### Phase 8.1: Tension Types and Output Structures (`src/output/tension.rs`)
+- `TensionType` enum with 10 types: BrewingBetrayal, SuccessionCrisis, ResourceConflict, ForbiddenAlliance, RevengeArc, RisingPower, FactionFracture, ExternalThreat, SecretExposed, RitualDisruption
+- `TensionStatus` enum: Developing, Escalating, Critical, DeEscalating, Resolved
+- `Tension` struct with severity, confidence, key_agents, predicted_outcomes, narrative_hooks
+- `TensionStream` resource for managing active tensions (with Resource derive for ECS)
+- `CameraFocus` struct for Director AI recommendations
+- Helper methods: update_severity(), add_agent(), add_predicted_outcome()
+- 4 unit tests
+
+### Phase 8.2: Tension Detection System (`src/systems/tension.rs`)
+- `detect_tensions` system runs every 10 ticks for performance
+- Detection functions:
+  - `detect_brewing_betrayal` - low trust + high ambition toward leader
+  - `detect_succession_crisis` - no leader or low average trust
+  - `detect_resource_conflict` - critical faction resources
+  - `detect_faction_fracture` - 3+ agents with negative trust toward leader
+  - `detect_forbidden_alliances` - cross-faction positive relationships
+  - `detect_revenge_arcs` - agents with Revenge goals
+  - `detect_rising_power` - high ambition + ChallengeLeader goal
+  - `detect_secret_exposed` - secondhand secret memories
+  - `detect_external_threat` - world-level active threats
+- `output_tensions` system writes to `output/tensions.json` every 100 ticks
+- 2 unit tests for constants validation
+
+### Integration (`src/main.rs`)
+- Added `TensionStream` resource
+- Added `detect_tensions` and `output_tensions` systems after rituals
+
+### Test Results
+- **56 tests passing**
+- Simulation runs successfully with tension detection infrastructure
+- Tensions file empty initially (expected - no negative conditions yet)
+
+### Files Changed
+- Created: `src/output/tension.rs` (updated with Resource derive), `src/systems/tension.rs`
+- Modified: `src/output/mod.rs`, `src/systems/mod.rs`, `src/main.rs`
+
+### Technical Notes
+- Empty `tensions.json` is expected behavior - agents start with positive trust
+- Tensions will emerge once negative events occur (betrayals, broken promises, etc.)
+- Detection runs periodically (every 10 ticks) for performance
+- System architecture is complete and ready for triggering conditions

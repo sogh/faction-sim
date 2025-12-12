@@ -24,6 +24,7 @@ use systems::{
     decay_memories, cleanup_memories,
     process_trust_events, decay_grudges,
     execute_rituals,
+    detect_tensions, output_tensions,
     PendingActions, SelectedActions, TickEvents,
     generate_movement_actions, generate_patrol_actions, generate_communication_actions, generate_archive_actions,
     apply_trait_weights, add_noise_to_weights, select_actions,
@@ -136,6 +137,9 @@ fn main() {
     // Initialize trust resources
     world.insert_resource(TrustEventQueue::new());
 
+    // Initialize tension stream for Director AI
+    world.insert_resource(output::TensionStream::new());
+
     // Spawn agents
     println!("Spawning agents...");
     {
@@ -240,6 +244,12 @@ fn main() {
     schedule.add_systems(
         execute_rituals.after(process_trust_events)
     );
+
+    // Tension detection runs after rituals (detect dramatic patterns)
+    schedule.add_systems((
+        detect_tensions,
+        output_tensions,
+    ).after(execute_rituals));
 
     println!();
     println!("Starting simulation...");

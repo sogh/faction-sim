@@ -4,9 +4,8 @@
 
 pub mod schemas;
 pub mod snapshot;
-
-// Tension output will be implemented later
-// pub mod tension;
+pub mod tension;
 
 pub use schemas::*;
 pub use snapshot::*;
+pub use tension::*;

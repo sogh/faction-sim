@@ -8,6 +8,7 @@ pub mod needs;
 pub mod memory;
 pub mod trust;
 pub mod ritual;
+pub mod tension;
 
 // Re-export commonly used systems
 pub use perception::{build_location_index, update_perception, AgentsByLocation, VisibleAgents};
@@ -30,7 +31,4 @@ pub use trust::{
     create_trust_event,
 };
 pub use ritual::execute_rituals;
-
-// Placeholder modules - will be implemented in later phases
-// pub mod tension;
-// pub mod snapshot;
+pub use tension::{detect_tensions, output_tensions};
