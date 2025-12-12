@@ -1,11 +1,12 @@
 //! ECS Systems
 //!
-//! All simulation systems for perception, needs, actions, memory, and tension.
+//! All simulation systems for perception, needs, actions, memory, trust, and tension.
 
 pub mod action;
 pub mod perception;
 pub mod needs;
 pub mod memory;
+pub mod trust;
 
 // Re-export commonly used systems
 pub use perception::{build_location_index, update_perception, AgentsByLocation, VisibleAgents};
@@ -22,6 +23,10 @@ pub use action::{
 pub use memory::{
     decay_memories, cleanup_memories, SeasonTracker,
     calculate_secondhand_trust_impact, get_most_interesting_memory,
+};
+pub use trust::{
+    process_trust_events, decay_grudges, TrustEventQueue, TrustEvent, TrustEventType,
+    create_trust_event,
 };
 
 // Placeholder modules - will be implemented in later phases

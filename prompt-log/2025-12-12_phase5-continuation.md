@@ -92,3 +92,38 @@ Added diagnostic output and ran simulation:
 
 ### Ready for Phase 6
 Archive and Rituals implementation next.
+
+---
+
+## Phase 6.1: Trust Dynamics Implementation
+
+### What was implemented
+
+#### Enhanced Trust (`components/social.rs`)
+- `apply_positive_interaction()` - small gains for positive interactions
+- `apply_broken_promise()` - reliability penalty (asymmetric - larger than gains)
+- `apply_capability_demonstrated()` / `apply_capability_failed()` - capability updates
+- `is_critically_low()` - checks if trust is in grudge territory (<-0.3)
+- `is_negative()` - checks if overall trust is negative
+
+#### Trust Queries (`components/social.rs`)
+- `most_trusted_among()` - "Who do I trust most in my faction?"
+- `perceived_betrayers()` - "Who has betrayed me?"
+- `sentiment_toward_faction()` - overall sentiment toward faction members
+- `distrusted_agents()` - all agents with negative trust
+- `relationships_by_trust()` - sorted by trust (highest first)
+
+#### Trust System (`systems/trust.rs`)
+- `TrustEventQueue` resource - queue of trust events to process
+- `TrustEvent` struct with event types (PositiveInteraction, PromiseKept, PromiseBroken, Betrayal, etc.)
+- `process_trust_events` system - updates trust and forms grudges
+- `decay_grudges` system - removes expired revenge goals
+- Grudge formation with persistence-based duration (low persistence = shorter grudge)
+
+#### Integration
+- Added TrustEventQueue resource to main.rs
+- Added trust systems to schedule after action execution
+
+### Test Results
+- 47 tests passing
+- Simulation runs successfully with trust infrastructure

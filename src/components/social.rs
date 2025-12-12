@@ -87,6 +87,40 @@ impl Trust {
         self.reliability = self.reliability.clamp(-1.0, 1.0);
         self.alignment = self.alignment.clamp(-1.0, 1.0);
     }
+
+    /// Apply positive interaction bonus (small gains)
+    /// Trust gains are slower than losses (asymmetric)
+    pub fn apply_positive_interaction(&mut self, intensity: f32) {
+        let gain = intensity * 0.05; // Small gains
+        self.reliability = (self.reliability + gain).clamp(-1.0, 1.0);
+        self.alignment = (self.alignment + gain * 0.5).clamp(-1.0, 1.0);
+    }
+
+    /// Apply broken promise penalty (reliability hit)
+    pub fn apply_broken_promise(&mut self) {
+        self.reliability -= 0.2; // Larger than positive gain (asymmetric)
+        self.reliability = self.reliability.clamp(-1.0, 1.0);
+    }
+
+    /// Apply demonstrated capability (positive)
+    pub fn apply_capability_demonstrated(&mut self, level: f32) {
+        self.capability = (self.capability + level * 0.1).clamp(-1.0, 1.0);
+    }
+
+    /// Apply capability failure (negative)
+    pub fn apply_capability_failed(&mut self) {
+        self.capability = (self.capability - 0.15).clamp(-1.0, 1.0);
+    }
+
+    /// Check if trust is critically low (grudge territory)
+    pub fn is_critically_low(&self) -> bool {
+        self.overall() < -0.3
+    }
+
+    /// Check if trust is negative
+    pub fn is_negative(&self) -> bool {
+        self.overall() < 0.0
+    }
 }
 
 /// A relationship between two agents
@@ -311,6 +345,67 @@ impl RelationshipGraph {
         self.relationships
             .entry(key)
             .or_insert_with(|| Relationship::new(to))
+    }
+
+    // === Trust Query Methods ===
+
+    /// "Who do I trust most in my faction?"
+    /// Returns the agent_id with highest overall trust among the given candidates
+    pub fn most_trusted_among(&self, agent_id: &str, candidates: &[String]) -> Option<String> {
+        candidates
+            .iter()
+            .filter_map(|candidate| {
+                self.get(agent_id, candidate)
+                    .map(|rel| (candidate.clone(), rel.trust.overall()))
+            })
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(id, _)| id)
+    }
+
+    /// "Who has betrayed me?" (agents with critically low trust)
+    pub fn perceived_betrayers(&self, agent_id: &str) -> Vec<String> {
+        self.relationships_for(agent_id)
+            .iter()
+            .filter(|rel| rel.trust.is_critically_low())
+            .map(|rel| rel.target_id.clone())
+            .collect()
+    }
+
+    /// "What's my overall sentiment toward faction X?"
+    /// Returns average trust across all known members of a faction
+    pub fn sentiment_toward_faction(&self, agent_id: &str, faction_members: &[String]) -> f32 {
+        let trusts: Vec<f32> = faction_members
+            .iter()
+            .filter_map(|member| {
+                self.get(agent_id, member).map(|rel| rel.trust.overall())
+            })
+            .collect();
+
+        if trusts.is_empty() {
+            return 0.0; // Neutral if no known members
+        }
+
+        trusts.iter().sum::<f32>() / trusts.len() as f32
+    }
+
+    /// Get all agents this agent has negative trust toward
+    pub fn distrusted_agents(&self, agent_id: &str) -> Vec<String> {
+        self.relationships_for(agent_id)
+            .iter()
+            .filter(|rel| rel.trust.is_negative())
+            .map(|rel| rel.target_id.clone())
+            .collect()
+    }
+
+    /// Get relationships sorted by trust (highest first)
+    pub fn relationships_by_trust(&self, agent_id: &str) -> Vec<&Relationship> {
+        let mut rels = self.relationships_for(agent_id);
+        rels.sort_by(|a, b| {
+            b.trust.overall()
+                .partial_cmp(&a.trust.overall())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        rels
     }
 }
 
