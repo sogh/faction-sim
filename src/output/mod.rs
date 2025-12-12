@@ -2,7 +2,11 @@
 //!
 //! Snapshot generation and tension stream output.
 
-// Placeholder modules - will be implemented in Phase 3
-// pub mod schemas;
-// pub mod snapshot;
+pub mod schemas;
+pub mod snapshot;
+
+// Tension output will be implemented later
 // pub mod tension;
+
+pub use schemas::*;
+pub use snapshot::*;

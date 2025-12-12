@@ -233,6 +233,79 @@ impl LocationRegistry {
     pub fn location_ids(&self) -> Vec<&String> {
         self.locations.keys().collect()
     }
+
+    /// Get adjacent location IDs
+    pub fn get_adjacent(&self, location_id: &str) -> Vec<String> {
+        self.get(location_id)
+            .map(|loc| loc.adjacent.clone())
+            .unwrap_or_default()
+    }
+
+    /// Check if a path exists between two locations (simple BFS)
+    pub fn path_exists(&self, from: &str, to: &str) -> bool {
+        if from == to {
+            return true;
+        }
+
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+
+        visited.insert(from.to_string());
+        queue.push_back(from.to_string());
+
+        while let Some(current) = queue.pop_front() {
+            let adjacent = self.get_adjacent(&current);
+            for next in adjacent {
+                if next == to {
+                    return true;
+                }
+                if !visited.contains(&next) {
+                    visited.insert(next.clone());
+                    queue.push_back(next);
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Get the next step on the shortest path to a destination
+    pub fn next_step_toward(&self, from: &str, to: &str) -> Option<String> {
+        if from == to {
+            return None;
+        }
+
+        // BFS to find shortest path
+        let mut visited = std::collections::HashMap::new();
+        let mut queue = std::collections::VecDeque::new();
+
+        visited.insert(from.to_string(), None::<String>);
+        queue.push_back(from.to_string());
+
+        while let Some(current) = queue.pop_front() {
+            if current == to {
+                // Backtrack to find first step
+                let mut step = to.to_string();
+                while let Some(Some(prev)) = visited.get(&step) {
+                    if prev == from {
+                        return Some(step);
+                    }
+                    step = prev.clone();
+                }
+                return Some(step);
+            }
+
+            let adjacent = self.get_adjacent(&current);
+            for next in adjacent {
+                if !visited.contains_key(&next) {
+                    visited.insert(next.clone(), Some(current.clone()));
+                    queue.push_back(next);
+                }
+            }
+        }
+
+        None
+    }
 }
 
 /// Season in the simulation

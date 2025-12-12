@@ -2,8 +2,11 @@
 //!
 //! All possible actions agents can take.
 
+pub mod movement;
+
+pub use movement::*;
+
 // Placeholder modules - will be implemented in later phases
-// pub mod movement;
 // pub mod communication;
 // pub mod social;
 // pub mod resource;

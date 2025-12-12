@@ -1,0 +1,226 @@
+//! Action Generation System
+//!
+//! Generates valid actions for each agent based on their state and surroundings.
+
+use bevy_ecs::prelude::*;
+use std::collections::HashMap;
+
+use crate::actions::movement::{MoveAction, MovementType};
+use crate::components::agent::{AgentId, FoodSecurity, Needs, Role, SocialBelonging};
+use crate::components::faction::{FactionMembership, FactionRegistry};
+use crate::components::world::{LocationRegistry, Position};
+
+/// Enum representing all possible actions an agent can take
+#[derive(Debug, Clone)]
+pub enum Action {
+    /// Move to an adjacent location
+    Move(MoveAction),
+    /// Stay at current location (default/idle action)
+    Idle,
+}
+
+/// A weighted action candidate
+#[derive(Debug, Clone)]
+pub struct WeightedAction {
+    pub action: Action,
+    pub weight: f32,
+    pub reason: String,
+}
+
+impl WeightedAction {
+    pub fn new(action: Action, weight: f32, reason: impl Into<String>) -> Self {
+        Self {
+            action,
+            weight,
+            reason: reason.into(),
+        }
+    }
+}
+
+/// Resource storing pending actions for each agent
+#[derive(Resource, Debug, Default)]
+pub struct PendingActions {
+    /// Maps agent_id -> list of weighted action candidates
+    pub actions: HashMap<String, Vec<WeightedAction>>,
+}
+
+impl PendingActions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn clear(&mut self) {
+        self.actions.clear();
+    }
+
+    pub fn add(&mut self, agent_id: impl Into<String>, action: WeightedAction) {
+        self.actions
+            .entry(agent_id.into())
+            .or_default()
+            .push(action);
+    }
+
+    pub fn get(&self, agent_id: &str) -> Option<&Vec<WeightedAction>> {
+        self.actions.get(agent_id)
+    }
+
+    pub fn take(&mut self, agent_id: &str) -> Option<Vec<WeightedAction>> {
+        self.actions.remove(agent_id)
+    }
+}
+
+/// System to generate movement actions for each agent
+pub fn generate_movement_actions(
+    location_registry: Res<LocationRegistry>,
+    faction_registry: Res<FactionRegistry>,
+    mut pending_actions: ResMut<PendingActions>,
+    query: Query<(&AgentId, &Position, &FactionMembership, &Needs)>,
+) {
+    for (agent_id, position, membership, needs) in query.iter() {
+        // Get current location and its adjacencies
+        let Some(current_location) = location_registry.get(&position.location_id) else {
+            continue;
+        };
+
+        let adjacent_locations = location_registry.get_adjacent(&position.location_id);
+
+        // Generate move actions for each adjacent location
+        for adjacent_id in &adjacent_locations {
+            let action = MoveAction::travel(&agent_id.0, adjacent_id);
+            pending_actions.add(
+                &agent_id.0,
+                WeightedAction::new(
+                    Action::Move(action),
+                    0.1, // Base weight for random movement
+                    format!("travel to {}", adjacent_id),
+                ),
+            );
+        }
+
+        // Generate return home action if not at HQ
+        if let Some(faction) = faction_registry.get(&membership.faction_id) {
+            if position.location_id != faction.hq_location {
+                // Check if path to HQ exists (simplified: check if HQ is adjacent or reachable)
+                let can_reach_hq = adjacent_locations.contains(&faction.hq_location)
+                    || location_registry.path_exists(&position.location_id, &faction.hq_location);
+
+                if can_reach_hq {
+                    // Find next step toward HQ
+                    let next_step = if adjacent_locations.contains(&faction.hq_location) {
+                        faction.hq_location.clone()
+                    } else {
+                        // Get first step on path to HQ
+                        location_registry
+                            .next_step_toward(&position.location_id, &faction.hq_location)
+                            .unwrap_or_else(|| adjacent_locations.first().cloned().unwrap_or_default())
+                    };
+
+                    if !next_step.is_empty() {
+                        let action = MoveAction::return_home(&agent_id.0, &next_step);
+                        let weight = if needs.social_belonging == SocialBelonging::Isolated {
+                            0.5 // Higher weight if isolated
+                        } else if needs.social_belonging == SocialBelonging::Peripheral {
+                            0.3
+                        } else {
+                            0.1
+                        };
+
+                        pending_actions.add(
+                            &agent_id.0,
+                            WeightedAction::new(
+                                Action::Move(action),
+                                weight,
+                                "return to faction HQ",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Always add idle option
+        pending_actions.add(
+            &agent_id.0,
+            WeightedAction::new(
+                Action::Idle,
+                0.2, // Base idle weight
+                "stay put",
+            ),
+        );
+    }
+}
+
+/// System to generate patrol actions for scouts
+pub fn generate_patrol_actions(
+    location_registry: Res<LocationRegistry>,
+    faction_registry: Res<FactionRegistry>,
+    mut pending_actions: ResMut<PendingActions>,
+    query: Query<(&AgentId, &Position, &FactionMembership)>,
+) {
+    for (agent_id, position, membership) in query.iter() {
+        // Only scouts generate patrol actions
+        if !matches!(membership.role, Role::ScoutCaptain) {
+            continue;
+        }
+
+        let Some(faction) = faction_registry.get(&membership.faction_id) else {
+            continue;
+        };
+
+        // Get adjacent locations within faction territory for patrol
+        let adjacent_locations = location_registry.get_adjacent(&position.location_id);
+
+        for adjacent_id in &adjacent_locations {
+            // Prefer patrolling within territory
+            let in_territory = faction.territory.contains(adjacent_id);
+            let base_weight = if in_territory { 0.4 } else { 0.15 };
+
+            let action = MoveAction::patrol(&agent_id.0, adjacent_id);
+            pending_actions.add(
+                &agent_id.0,
+                WeightedAction::new(
+                    Action::Move(action),
+                    base_weight,
+                    format!("patrol to {}", adjacent_id),
+                ),
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pending_actions() {
+        let mut pending = PendingActions::new();
+
+        pending.add(
+            "agent_001",
+            WeightedAction::new(Action::Idle, 0.5, "test"),
+        );
+        pending.add(
+            "agent_001",
+            WeightedAction::new(
+                Action::Move(MoveAction::travel("agent_001", "village")),
+                0.3,
+                "travel",
+            ),
+        );
+
+        let actions = pending.get("agent_001").unwrap();
+        assert_eq!(actions.len(), 2);
+
+        let taken = pending.take("agent_001").unwrap();
+        assert_eq!(taken.len(), 2);
+        assert!(pending.get("agent_001").is_none());
+    }
+
+    #[test]
+    fn test_weighted_action() {
+        let action = WeightedAction::new(Action::Idle, 0.5, "resting");
+        assert_eq!(action.weight, 0.5);
+        assert_eq!(action.reason, "resting");
+    }
+}

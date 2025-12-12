@@ -4,9 +4,8 @@
 
 pub mod world;
 pub mod factions;
-
-// Agent spawning will be implemented in Phase 2.2
-// pub mod agents;
+pub mod agents;
 
 pub use world::*;
 pub use factions::*;
+pub use agents::*;

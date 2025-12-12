@@ -17,6 +17,16 @@ mod actions;
 mod output;
 mod setup;
 
+use systems::{
+    AgentsByLocation, InteractionTracker, RitualAttendance,
+    build_location_index, update_perception,
+    update_food_security, update_social_belonging, decay_interaction_counts,
+    PendingActions, SelectedActions, TickEvents,
+    generate_movement_actions, generate_patrol_actions,
+    apply_trait_weights, add_noise_to_weights, select_actions,
+    execute_movement_actions,
+};
+
 pub use components::*;
 
 /// Command line arguments for the simulation
@@ -53,9 +63,8 @@ pub struct SimulationState {
     pub snapshot_interval: u64,
 }
 
-/// Seeded random number generator resource
-#[derive(Resource)]
-pub struct SimRng(pub SmallRng);
+// Re-export SimRng from lib
+pub use emergent_sim::SimRng;
 
 fn main() {
     let args = Args::parse();
@@ -110,16 +119,95 @@ fn main() {
     world.insert_resource(social::RelationshipGraph::new());
     world.insert_resource(social::MemoryBank::new());
 
+    // Initialize perception and needs resources
+    world.insert_resource(AgentsByLocation::new());
+    world.insert_resource(InteractionTracker::new());
+    world.insert_resource(RitualAttendance::new());
+
+    // Initialize action resources
+    world.insert_resource(PendingActions::new());
+    world.insert_resource(SelectedActions::new());
+    world.insert_resource(TickEvents::new());
+
+    // Spawn agents
+    println!("Spawning agents...");
+    {
+        // Take the RNG out to avoid borrow conflicts
+        let mut sim_rng = world.remove_resource::<SimRng>().unwrap();
+        setup::spawn_all_agents(&mut world, &mut sim_rng.0);
+        world.insert_resource(sim_rng);
+    }
+    let summary = setup::get_spawn_summary(&mut world);
+    println!("  Spawned {} agents", summary.total_agents);
+    for (faction, count) in &summary.by_faction {
+        println!("    {}: {}", faction, count);
+    }
+
+    // Initialize snapshot generator
+    world.insert_resource(output::SnapshotGenerator::new(args.snapshot_interval));
+
     // Output initial state if requested
     if args.output_initial_state {
         output_initial_state(&world);
     }
 
+    // Generate initial snapshot
+    println!("Generating initial snapshot...");
+    let initial_snapshot = output::generate_snapshot(&mut world, "simulation_start");
+    if let Err(e) = output::write_snapshot_to_dir(&initial_snapshot) {
+        eprintln!("  Warning: Could not write initial snapshot: {}", e);
+    }
+    if let Err(e) = output::write_current_state(&initial_snapshot) {
+        eprintln!("  Warning: Could not write current state: {}", e);
+    } else {
+        println!("  Wrote initial snapshot (tick 0)");
+    }
+
     // Create the schedule
     let mut schedule = Schedule::default();
 
-    // Add systems to the schedule (placeholder for now)
-    // Systems will be added in later implementation phases
+    // Add systems to the schedule
+    // Perception systems run first to update awareness
+    schedule.add_systems((
+        build_location_index,
+        update_perception,
+    ).chain());
+
+    // Needs systems run after perception
+    schedule.add_systems((
+        update_food_security,
+        update_social_belonging,
+        decay_interaction_counts,
+    ).after(update_perception));
+
+    // Action systems run after needs
+    // 1. Generate possible actions
+    // 2. Apply trait-based weight modifiers
+    // 3. Add noise for variety
+    // 4. Select action probabilistically
+    // 5. Execute selected action
+    schedule.add_systems((
+        generate_movement_actions,
+        generate_patrol_actions,
+    ).after(decay_interaction_counts));
+
+    schedule.add_systems(
+        apply_trait_weights
+            .after(generate_movement_actions)
+            .after(generate_patrol_actions)
+    );
+
+    schedule.add_systems(
+        add_noise_to_weights.after(apply_trait_weights)
+    );
+
+    schedule.add_systems(
+        select_actions.after(add_noise_to_weights)
+    );
+
+    schedule.add_systems(
+        execute_movement_actions.after(select_actions)
+    );
 
     println!();
     println!("Starting simulation...");
@@ -134,6 +222,22 @@ fn main() {
         // Run all systems
         schedule.run(&mut world);
 
+        // Generate periodic snapshots
+        let should_snapshot = {
+            let generator = world.resource::<output::SnapshotGenerator>();
+            tick > 0 && generator.should_snapshot(tick)
+        };
+        if should_snapshot {
+            let snapshot = output::generate_snapshot(&mut world, "periodic");
+            if let Err(e) = output::write_snapshot_to_dir(&snapshot) {
+                eprintln!("Warning: Could not write snapshot at tick {}: {}", tick, e);
+            }
+            if let Err(e) = output::write_current_state(&snapshot) {
+                eprintln!("Warning: Could not write current state at tick {}: {}", tick, e);
+            }
+            world.resource_mut::<output::SnapshotGenerator>().mark_snapshot(tick);
+        }
+
         // Print progress every 100 ticks
         if tick > 0 && tick % 100 == 0 {
             let world_state = world.resource::<world::WorldState>();
@@ -146,6 +250,15 @@ fn main() {
         }
     }
 
+    // Generate final snapshot
+    let final_snapshot = output::generate_snapshot(&mut world, "simulation_end");
+    if let Err(e) = output::write_snapshot_to_dir(&final_snapshot) {
+        eprintln!("Warning: Could not write final snapshot: {}", e);
+    }
+    if let Err(e) = output::write_current_state(&final_snapshot) {
+        eprintln!("Warning: Could not write final current state: {}", e);
+    }
+
     println!();
     let world_state = world.resource::<world::WorldState>();
     println!(
@@ -153,6 +266,9 @@ fn main() {
         args.ticks,
         world_state.formatted_date()
     );
+
+    let generator = world.resource::<output::SnapshotGenerator>();
+    println!("Generated {} snapshots.", generator.snapshot_count());
 }
 
 /// Output the initial world state as JSON files
