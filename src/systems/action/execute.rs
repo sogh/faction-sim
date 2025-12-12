@@ -6,6 +6,7 @@ use bevy_ecs::prelude::*;
 
 use crate::actions::movement::{MoveAction, MovementType};
 use crate::actions::communication::{CommunicationAction, CommunicationType, TargetMode, communication_weights};
+use crate::actions::archive::{ArchiveAction, ArchiveActionType};
 use crate::components::agent::{AgentId, AgentName};
 use crate::components::social::{Memory, MemoryBank, MemorySource, MemoryValence, RelationshipGraph};
 use crate::components::world::{Position, WorldState};
@@ -13,7 +14,9 @@ use crate::events::types::{
     ActorSnapshot, Event, EventActors, EventContext, EventOutcome, EventTimestamp, EventType,
     EventSubtype, MovementSubtype, MovementOutcome, CommunicationSubtype,
     CommunicationOutcome as EventCommunicationOutcome, MemorySharedInfo, RecipientStateChange,
+    ArchiveSubtype, ArchiveOutcome,
 };
+use crate::components::faction::{FactionRegistry, ArchiveEntry};
 use crate::systems::memory::calculate_secondhand_trust_impact;
 use crate::systems::perception::AgentsByLocation;
 
@@ -91,6 +94,9 @@ pub fn execute_movement_actions(
             }
             Action::Communicate(_) => {
                 // Communication is handled by execute_communication_actions
+            }
+            Action::Archive(_) => {
+                // Archive is handled by execute_archive_actions
             }
             Action::Idle => {
                 // No action needed for idle
@@ -522,6 +528,229 @@ fn get_communication_drama_tags(memory: &Memory, comm_action: &CommunicationActi
     }
 
     tags
+}
+
+/// System to execute archive actions
+pub fn execute_archive_actions(
+    world_state: Res<WorldState>,
+    mut faction_registry: ResMut<FactionRegistry>,
+    memory_bank: Res<MemoryBank>,
+    mut selected_actions: ResMut<SelectedActions>,
+    mut tick_events: ResMut<TickEvents>,
+    query: Query<(&AgentId, &AgentName, &Position, &crate::components::faction::FactionMembership)>,
+) {
+    // Collect archive actions to process
+    let mut archive_actions: Vec<(String, ArchiveAction, String, String, String)> = Vec::new();
+
+    for (agent_id, name, pos, membership) in query.iter() {
+        if let Some(action) = selected_actions.actions.get(&agent_id.0) {
+            if let Action::Archive(archive_action) = action {
+                archive_actions.push((
+                    agent_id.0.clone(),
+                    archive_action.clone(),
+                    name.0.clone(),
+                    pos.location_id.clone(),
+                    membership.faction_id.clone(),
+                ));
+            }
+        }
+    }
+
+    // Process each archive action
+    for (actor_id, archive_action, actor_name, location, actor_faction) in archive_actions {
+        match archive_action.action_type {
+            ArchiveActionType::WriteEntry => {
+                // Get the memory being written
+                let memory_content = archive_action.memory_id.as_ref().and_then(|mem_id| {
+                    memory_bank.get_memories(&actor_id)
+                        .and_then(|mems| mems.iter().find(|m| &m.memory_id == mem_id).cloned())
+                });
+
+                if let Some(memory) = memory_content {
+                    // Write entry to archive
+                    if let Some(archive) = faction_registry.get_archive_mut(&archive_action.faction_id) {
+                        let entry_id = archive.generate_id(&archive_action.faction_id);
+                        let entry = ArchiveEntry::new(
+                            &entry_id,
+                            &actor_id,
+                            &actor_name,
+                            &memory.subject,
+                            &memory.content,
+                            world_state.current_tick,
+                        );
+                        archive.add_entry(entry);
+
+                        // Generate event
+                        let event = create_archive_event(
+                            &mut tick_events,
+                            &world_state,
+                            &actor_id,
+                            &actor_name,
+                            &actor_faction,
+                            &location,
+                            ArchiveSubtype::WriteEntry,
+                            Some(&entry_id),
+                            Some(&memory.content),
+                            Some(&memory.subject),
+                            true,
+                        );
+                        tick_events.push(event);
+                    }
+                }
+            }
+            ArchiveActionType::ReadArchive => {
+                // Reading just generates an event (could also create a memory later)
+                let event = create_archive_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    ArchiveSubtype::ReadEntry,
+                    None,
+                    None,
+                    None,
+                    true,
+                );
+                tick_events.push(event);
+            }
+            ArchiveActionType::DestroyEntry => {
+                if let Some(entry_id) = &archive_action.entry_id {
+                    if let Some(archive) = faction_registry.get_archive_mut(&archive_action.faction_id) {
+                        let entry_content = archive.find_entry(entry_id).map(|e| e.content.clone());
+                        let entry_subject = archive.find_entry(entry_id).map(|e| e.subject.clone());
+
+                        if archive.remove_entry(entry_id) {
+                            let event = create_archive_event(
+                                &mut tick_events,
+                                &world_state,
+                                &actor_id,
+                                &actor_name,
+                                &actor_faction,
+                                &location,
+                                ArchiveSubtype::DestroyEntry,
+                                Some(entry_id),
+                                entry_content.as_deref(),
+                                entry_subject.as_deref(),
+                                true,
+                            );
+                            tick_events.push(event);
+                        }
+                    }
+                }
+            }
+            ArchiveActionType::ForgeEntry => {
+                // Create a forged entry
+                if let (Some(subject), Some(content)) = (&archive_action.subject, &archive_action.content) {
+                    if let Some(archive) = faction_registry.get_archive_mut(&archive_action.faction_id) {
+                        let entry_id = archive.generate_id(&archive_action.faction_id);
+                        let entry = ArchiveEntry::forged(
+                            &entry_id,
+                            &actor_id,
+                            &actor_name,
+                            subject,
+                            content,
+                            world_state.current_tick,
+                        );
+                        archive.add_entry(entry);
+
+                        let event = create_archive_event(
+                            &mut tick_events,
+                            &world_state,
+                            &actor_id,
+                            &actor_name,
+                            &actor_faction,
+                            &location,
+                            ArchiveSubtype::ForgeEntry,
+                            Some(&entry_id),
+                            Some(content),
+                            Some(subject),
+                            false,
+                        );
+                        tick_events.push(event);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Create an archive event
+fn create_archive_event(
+    tick_events: &mut TickEvents,
+    world_state: &WorldState,
+    actor_id: &str,
+    actor_name: &str,
+    actor_faction: &str,
+    location: &str,
+    subtype: ArchiveSubtype,
+    entry_id: Option<&str>,
+    content: Option<&str>,
+    subject: Option<&str>,
+    is_authentic: bool,
+) -> Event {
+    let event_id = tick_events.generate_id();
+    let timestamp = EventTimestamp {
+        tick: world_state.current_tick,
+        date: world_state.formatted_date(),
+    };
+
+    let actor = ActorSnapshot {
+        agent_id: actor_id.to_string(),
+        name: actor_name.to_string(),
+        faction: actor_faction.to_string(),
+        role: "archive_accessor".to_string(),
+        location: location.to_string(),
+    };
+
+    let trigger = match subtype {
+        ArchiveSubtype::WriteEntry => "recording_memory",
+        ArchiveSubtype::ReadEntry => "reading_history",
+        ArchiveSubtype::DestroyEntry => "destroying_record",
+        ArchiveSubtype::ForgeEntry => "forging_record",
+    };
+
+    let drama_score = match subtype {
+        ArchiveSubtype::WriteEntry => 0.2,
+        ArchiveSubtype::ReadEntry => 0.1,
+        ArchiveSubtype::DestroyEntry => 0.6,
+        ArchiveSubtype::ForgeEntry => 0.7,
+    };
+
+    let mut drama_tags = Vec::new();
+    if !is_authentic {
+        drama_tags.push("forgery".to_string());
+    }
+    if matches!(subtype, ArchiveSubtype::DestroyEntry) {
+        drama_tags.push("history_erased".to_string());
+    }
+
+    Event {
+        event_id,
+        timestamp,
+        event_type: EventType::Archive,
+        subtype: EventSubtype::Archive(subtype),
+        actors: EventActors {
+            primary: actor,
+            secondary: None,
+            affected: None,
+        },
+        context: EventContext {
+            trigger: trigger.to_string(),
+            preconditions: Vec::new(),
+            location_description: Some(format!("at faction archive in {}", location)),
+        },
+        outcome: EventOutcome::Archive(ArchiveOutcome {
+            entry_id: entry_id.map(|s| s.to_string()),
+            content: content.map(|s| s.to_string()),
+            subject: subject.map(|s| s.to_string()),
+            is_authentic,
+        }),
+        drama_tags,
+        drama_score,
+        connected_events: Vec::new(),
+    }
 }
 
 #[cfg(test)]

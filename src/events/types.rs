@@ -298,7 +298,24 @@ pub enum EventOutcome {
     Movement(MovementOutcome),
     Communication(CommunicationOutcome),
     Relationship(RelationshipOutcome),
+    Archive(ArchiveOutcome),
     General(GeneralOutcome),
+}
+
+/// Archive event outcome
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveOutcome {
+    /// The entry ID that was created, read, destroyed, or forged
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_id: Option<String>,
+    /// Content of the entry (for write/forge events)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    /// Subject of the entry
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    /// Whether the action was authentic (false for forged entries)
+    pub is_authentic: bool,
 }
 
 /// Movement event outcome

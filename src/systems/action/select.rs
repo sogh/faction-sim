@@ -129,6 +129,7 @@ mod tests {
                 Action::Idle => idle_count += 1,
                 Action::Move(_) => move_count += 1,
                 Action::Communicate(_) => {} // Not used in this test
+                Action::Archive(_) => {} // Not used in this test
             }
         }
 

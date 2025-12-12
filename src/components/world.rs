@@ -445,6 +445,12 @@ impl WorldState {
         self.update_date();
     }
 
+    /// Set the tick to a specific value
+    pub fn set_tick(&mut self, tick: u64) {
+        self.current_tick = tick;
+        self.update_date();
+    }
+
     /// Update the date based on current tick
     fn update_date(&mut self) {
         let total_days = self.current_tick / self.time_config.ticks_per_day;

@@ -7,9 +7,10 @@ use std::collections::HashMap;
 
 use crate::actions::movement::{MoveAction, MovementType};
 use crate::actions::communication::{CommunicationAction, CommunicationType, TargetMode};
+use crate::actions::archive::{ArchiveAction, ArchiveActionType};
 use crate::components::agent::{AgentId, AgentName, FoodSecurity, Needs, Role, SocialBelonging, Traits};
 use crate::components::faction::{FactionMembership, FactionRegistry};
-use crate::components::social::{MemoryBank, RelationshipGraph};
+use crate::components::social::{MemoryBank, MemoryValence, RelationshipGraph};
 use crate::components::world::{LocationRegistry, Position};
 use crate::systems::perception::AgentsByLocation;
 use crate::systems::memory::get_most_interesting_memory;
@@ -21,6 +22,8 @@ pub enum Action {
     Move(MoveAction),
     /// Communicate with other agents
     Communicate(CommunicationAction),
+    /// Interact with faction archive
+    Archive(ArchiveAction),
     /// Stay at current location (default/idle action)
     Idle,
 }
@@ -286,6 +289,96 @@ pub fn generate_communication_actions(
                     break;
                 }
             }
+        }
+    }
+}
+
+/// System to generate archive actions for agents at faction HQ
+///
+/// Generates write_entry actions when:
+/// - Agent is at their faction HQ
+/// - Agent can write to archive (leader, reader, or council member)
+/// - Agent has a significant memory worth recording
+pub fn generate_archive_actions(
+    world_state: Res<crate::components::world::WorldState>,
+    faction_registry: Res<FactionRegistry>,
+    memory_bank: Res<MemoryBank>,
+    mut pending_actions: ResMut<PendingActions>,
+    query: Query<(&AgentId, &AgentName, &Position, &FactionMembership, &Traits)>,
+) {
+    use crate::actions::archive::archive_weights;
+
+    for (agent_id, agent_name, position, membership, traits) in query.iter() {
+        // Check if agent is at their faction HQ
+        let Some(faction) = faction_registry.get(&membership.faction_id) else {
+            continue;
+        };
+
+        if position.location_id != faction.hq_location {
+            continue;
+        }
+
+        // Check if agent can write to archive
+        if !membership.can_write_archive() {
+            continue;
+        }
+
+        // Find a significant memory to write
+        let Some(memories) = memory_bank.get_memories(&agent_id.0) else {
+            continue;
+        };
+
+        // Find the most significant unrecorded memory
+        let significant_memory = memories
+            .iter()
+            .filter(|m| m.emotional_weight > 0.3 && m.fidelity > 0.5)
+            .max_by(|a, b| {
+                a.emotional_weight
+                    .partial_cmp(&b.emotional_weight)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+        if let Some(memory) = significant_memory {
+            let mut weight = archive_weights::WRITE_BASE;
+
+            // Bonus for significant events
+            if memory.emotional_weight > 0.6 {
+                weight += archive_weights::SIGNIFICANT_EVENT_BONUS;
+            }
+
+            // Bonus if memory reflects well on self
+            if memory.subject == agent_id.0 && memory.valence == MemoryValence::Positive {
+                weight += archive_weights::SELF_FAVORABLE_BONUS;
+            }
+
+            let action = ArchiveAction::write_entry(
+                &agent_id.0,
+                &membership.faction_id,
+                &memory.memory_id,
+            );
+
+            pending_actions.add(
+                &agent_id.0,
+                WeightedAction::new(
+                    Action::Archive(action),
+                    weight,
+                    format!("record {} in archive", memory.subject),
+                ),
+            );
+        }
+
+        // Generate read archive action (for anyone at HQ)
+        let archive = faction_registry.get_archive(&membership.faction_id);
+        if archive.map_or(false, |a| a.entry_count() > 0) {
+            let action = ArchiveAction::read_archive(&agent_id.0, &membership.faction_id);
+            pending_actions.add(
+                &agent_id.0,
+                WeightedAction::new(
+                    Action::Archive(action),
+                    archive_weights::READ_BASE,
+                    "read faction archive".to_string(),
+                ),
+            );
         }
     }
 }

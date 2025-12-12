@@ -6,6 +6,7 @@ use bevy_ecs::prelude::*;
 
 use crate::actions::movement::MovementType;
 use crate::actions::communication::{CommunicationType, TargetMode, communication_weights};
+use crate::actions::archive::{ArchiveAction, ArchiveActionType, archive_weights};
 use crate::components::agent::{AgentId, FoodSecurity, Needs, Role, SocialBelonging, Traits};
 use crate::components::faction::{FactionMembership, FactionRegistry};
 use crate::components::social::{MemoryValence, RelationshipGraph};
@@ -52,8 +53,55 @@ fn calculate_weight_modifier(
         Action::Communicate(comm_action) => {
             calculate_communication_modifier(comm_action, traits, needs, membership)
         }
+        Action::Archive(archive_action) => {
+            calculate_archive_modifier(archive_action, traits, needs, membership)
+        }
         Action::Idle => calculate_idle_modifier(traits, needs),
     }
+}
+
+/// Calculate archive action weight modifier
+fn calculate_archive_modifier(
+    action: &ArchiveAction,
+    traits: &Traits,
+    _needs: &Needs,
+    membership: &FactionMembership,
+) -> f32 {
+    let mut modifier = 1.0;
+
+    match action.action_type {
+        ArchiveActionType::WriteEntry => {
+            // Writing is somewhat influenced by ambition (want to be recorded in history)
+            modifier *= 0.8 + traits.ambition * 0.4;
+        }
+        ArchiveActionType::ReadArchive => {
+            // Reading is baseline, no strong trait influence
+            modifier *= 1.0;
+        }
+        ArchiveActionType::DestroyEntry => {
+            // Destroying entries requires low honesty and some boldness
+            // High honesty agents strongly avoid this
+            modifier *= (1.0 - traits.honesty) * 1.5;
+            modifier *= 0.5 + traits.boldness * 0.5;
+
+            // Leaders are more cautious about destroying records
+            if matches!(membership.role, Role::Leader) {
+                modifier *= 0.5;
+            }
+        }
+        ArchiveActionType::ForgeEntry => {
+            // Forging requires low honesty threshold and high ambition
+            if traits.honesty > archive_weights::HONESTY_FORGE_THRESHOLD {
+                // Honest agents essentially never forge
+                modifier *= 0.01;
+            } else {
+                modifier *= (1.0 - traits.honesty) * 2.0;
+                modifier *= 0.5 + traits.ambition * archive_weights::AMBITION_FORGE_BONUS;
+            }
+        }
+    }
+
+    modifier
 }
 
 /// Calculate communication action weight modifier

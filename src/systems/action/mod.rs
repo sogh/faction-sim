@@ -7,7 +7,7 @@ pub mod weight;
 pub mod select;
 pub mod execute;
 
-pub use generate::{Action, PendingActions, WeightedAction, generate_movement_actions, generate_patrol_actions, generate_communication_actions};
+pub use generate::{Action, PendingActions, WeightedAction, generate_movement_actions, generate_patrol_actions, generate_communication_actions, generate_archive_actions};
 pub use weight::apply_trait_weights;
 pub use select::{SelectedActions, select_actions, add_noise_to_weights};
-pub use execute::{TickEvents, execute_movement_actions, execute_communication_actions};
+pub use execute::{TickEvents, execute_movement_actions, execute_communication_actions, execute_archive_actions};

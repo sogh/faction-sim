@@ -127,3 +127,69 @@ Archive and Rituals implementation next.
 ### Test Results
 - 47 tests passing
 - Simulation runs successfully with trust infrastructure
+
+---
+
+## Phase 7: Archive and Ritual Systems (Context Continuation)
+
+### User Request
+User requested to continue implementation. This session picked up from where context was truncated.
+
+### Phase 7.1: Archive System
+
+#### `src/actions/archive.rs`
+- `ArchiveActionType` enum: WriteEntry, ReadArchive, DestroyEntry, ForgeEntry
+- `ArchiveAction` struct with factory methods
+- Weight constants for archive actions (write_base, significant_event_bonus, self_favorable_bonus, etc.)
+
+#### Action Pipeline Updates
+- `generate.rs`: Added `Action::Archive` variant and `generate_archive_actions` system
+- `weight.rs`: Added `calculate_archive_modifier` for trait-based weighting (ambition, honesty)
+- `execute.rs`: Added `execute_archive_actions` with full archive manipulation logic
+  - WriteEntry: Creates archive entry from memory
+  - ReadArchive: Generates reading event
+  - DestroyEntry: Removes entries (for dishonest agents)
+  - ForgeEntry: Creates false entries
+- `select.rs`: Added Archive pattern matching
+
+#### Events (`events/types.rs`)
+- Added `ArchiveOutcome` struct for archive event outcomes
+- Integration with EventOutcome enum
+
+### Phase 7.2: Ritual Reading System
+
+#### `src/systems/ritual.rs` (NEW)
+- `ENTRIES_PER_RITUAL` constant (3 entries read per ritual)
+- `execute_rituals` system:
+  - Checks `is_ritual_due` for each faction
+  - Gathers faction members at HQ
+  - Reads least-read archive entries
+  - Creates memories for all attendees
+  - Tracks attendance (recorded/missed)
+  - Generates ritual events with drama scoring
+- `create_ritual_event` helper function
+
+#### Bug Fixes
+- Fixed off-by-one tick issue: `WorldState.advance_tick()` was incrementing, causing tick mismatch
+- Added `WorldState.set_tick()` method to set tick directly
+- Updated main.rs to use `set_tick()` instead of `advance_tick()` for consistent tick numbering
+
+### Test Results
+- **50 tests passing**
+- Simulation runs correctly with archive and ritual events
+- Rituals occur on schedule (every `ritual_interval` ticks per faction, staggered)
+- Archive actions occur when agents at HQ have significant memories
+
+### Output Sample (500 ticks, ritual_interval=100)
+```
+[Tick  100] year_1.spring.day_11 - 212 events (moves: 21, comms: 190, RITUALS: 1)
+[Tick  150] year_1.spring.day_16 - 207 events (moves: 23, comms: 183, RITUALS: 1)
+[Tick  200] year_1.spring.day_21 - 209 events (moves: 24, comms: 184, RITUALS: 1)
+```
+
+### Files Changed
+- Created: `src/systems/ritual.rs`
+- Modified: `src/actions/archive.rs`, `src/systems/mod.rs`, `src/systems/action/mod.rs`, `src/systems/action/generate.rs`, `src/systems/action/weight.rs`, `src/systems/action/execute.rs`, `src/systems/action/select.rs`, `src/events/types.rs`, `src/components/world.rs`, `src/main.rs`
+
+### Next Steps
+Ready for commit of Phase 7, then continue with remaining implementation phases.

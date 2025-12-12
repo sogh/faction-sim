@@ -23,10 +23,11 @@ use systems::{
     update_food_security, update_social_belonging, decay_interaction_counts,
     decay_memories, cleanup_memories,
     process_trust_events, decay_grudges,
+    execute_rituals,
     PendingActions, SelectedActions, TickEvents,
-    generate_movement_actions, generate_patrol_actions, generate_communication_actions,
+    generate_movement_actions, generate_patrol_actions, generate_communication_actions, generate_archive_actions,
     apply_trait_weights, add_noise_to_weights, select_actions,
-    execute_movement_actions, execute_communication_actions,
+    execute_movement_actions, execute_communication_actions, execute_archive_actions,
 };
 
 pub use components::*;
@@ -202,6 +203,7 @@ fn main() {
         generate_movement_actions,
         generate_patrol_actions,
         generate_communication_actions,
+        generate_archive_actions,
     ).after(cleanup_memories));
 
     schedule.add_systems(
@@ -209,6 +211,7 @@ fn main() {
             .after(generate_movement_actions)
             .after(generate_patrol_actions)
             .after(generate_communication_actions)
+            .after(generate_archive_actions)
     );
 
     schedule.add_systems(
@@ -223,6 +226,7 @@ fn main() {
     schedule.add_systems((
         execute_movement_actions,
         execute_communication_actions,
+        execute_archive_actions,
     ).after(select_actions));
 
     // Trust systems run after action execution
@@ -230,7 +234,12 @@ fn main() {
     schedule.add_systems((
         process_trust_events,
         decay_grudges,
-    ).after(execute_communication_actions).after(execute_movement_actions));
+    ).after(execute_communication_actions).after(execute_movement_actions).after(execute_archive_actions));
+
+    // Ritual system runs after trust (rituals are periodic faction-wide events)
+    schedule.add_systems(
+        execute_rituals.after(process_trust_events)
+    );
 
     println!();
     println!("Starting simulation...");
@@ -238,9 +247,9 @@ fn main() {
 
     // Main simulation loop
     for tick in 0..args.ticks {
-        // Update current tick
+        // Update current tick (set both to same value to avoid off-by-one)
         world.resource_mut::<SimulationState>().current_tick = tick;
-        world.resource_mut::<world::WorldState>().advance_tick();
+        world.resource_mut::<world::WorldState>().set_tick(tick);
 
         // Run all systems
         schedule.run(&mut world);
@@ -253,16 +262,27 @@ fn main() {
                 let world_state = world.resource::<world::WorldState>();
                 let mut move_count = 0;
                 let mut comm_count = 0;
+                let mut archive_count = 0;
+                let mut ritual_count = 0;
                 for event in &tick_events.events {
                     match event.event_type {
                         events::types::EventType::Movement => move_count += 1,
                         events::types::EventType::Communication => comm_count += 1,
+                        events::types::EventType::Archive => archive_count += 1,
+                        events::types::EventType::Ritual => ritual_count += 1,
                         _ => {}
                     }
                 }
+                let mut extra = String::new();
+                if archive_count > 0 {
+                    extra.push_str(&format!(", archive: {}", archive_count));
+                }
+                if ritual_count > 0 {
+                    extra.push_str(&format!(", RITUALS: {}", ritual_count));
+                }
                 println!(
-                    "[Tick {:>4}] {} - {} events (moves: {}, comms: {})",
-                    tick, world_state.formatted_date(), event_count, move_count, comm_count
+                    "[Tick {:>4}] {} - {} events (moves: {}, comms: {}{})",
+                    tick, world_state.formatted_date(), event_count, move_count, comm_count, extra
                 );
             }
         }
