@@ -234,6 +234,31 @@ fn main() {
         // Run all systems
         schedule.run(&mut world);
 
+        // Report events generated this tick (summary every 10 ticks)
+        {
+            let tick_events = world.resource::<systems::TickEvents>();
+            let event_count = tick_events.events.len();
+            if event_count > 0 && tick % 10 == 0 {
+                let world_state = world.resource::<world::WorldState>();
+                let mut move_count = 0;
+                let mut comm_count = 0;
+                for event in &tick_events.events {
+                    match event.event_type {
+                        events::types::EventType::Movement => move_count += 1,
+                        events::types::EventType::Communication => comm_count += 1,
+                        _ => {}
+                    }
+                }
+                println!(
+                    "[Tick {:>4}] {} - {} events (moves: {}, comms: {})",
+                    tick, world_state.formatted_date(), event_count, move_count, comm_count
+                );
+            }
+        }
+
+        // Clear events after reporting (they'd be logged to file in full implementation)
+        world.resource_mut::<systems::TickEvents>().events.clear();
+
         // Generate periodic snapshots
         let should_snapshot = {
             let generator = world.resource::<output::SnapshotGenerator>();

@@ -24,3 +24,9 @@ target
 # Added by cargo
 
 /target
+
+# Generated simulation output
+/output/
+
+# Local Claude Code settings
+/.claude/

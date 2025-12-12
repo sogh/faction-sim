@@ -70,3 +70,25 @@
 
 ## Next Steps
 Ready for commit of Phase 5, then continue with Phase 6 (Archive and Rituals) or other phases.
+
+---
+
+## Session Update: Verification & Phase 6 Prep
+
+### User Request
+"Can we run the game and observe some output to confirm its doing what i expect?"
+
+### Verification Results
+Added diagnostic output and ran simulation:
+- **437 shareable memories** across 220 agents at startup
+- **Tick 0**: 195 events (10 moves, 185 communications)
+- **Tick 10**: 203 events (21 moves, 182 communications)
+- Communication working across all 4 factions
+- Drama scores ranging 0.24-0.60 based on memory content
+
+### Changes Made
+- Added event reporting to main.rs (summary every 10 ticks)
+- Added output/ and .claude/ to .gitignore
+
+### Ready for Phase 6
+Archive and Rituals implementation next.
