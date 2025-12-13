@@ -27,8 +27,10 @@ use systems::{
     detect_tensions, output_tensions,
     PendingActions, SelectedActions, TickEvents,
     generate_movement_actions, generate_patrol_actions, generate_communication_actions, generate_archive_actions,
+    generate_resource_actions, generate_social_actions, generate_faction_actions, generate_conflict_actions,
     apply_trait_weights, add_noise_to_weights, select_actions,
     execute_movement_actions, execute_communication_actions, execute_archive_actions,
+    execute_resource_actions, execute_social_actions, execute_faction_actions, execute_conflict_actions,
 };
 
 pub use components::*;
@@ -208,6 +210,10 @@ fn main() {
         generate_patrol_actions,
         generate_communication_actions,
         generate_archive_actions,
+        generate_resource_actions,
+        generate_social_actions,
+        generate_faction_actions,
+        generate_conflict_actions,
     ).after(cleanup_memories));
 
     schedule.add_systems(
@@ -216,6 +222,10 @@ fn main() {
             .after(generate_patrol_actions)
             .after(generate_communication_actions)
             .after(generate_archive_actions)
+            .after(generate_resource_actions)
+            .after(generate_social_actions)
+            .after(generate_faction_actions)
+            .after(generate_conflict_actions)
     );
 
     schedule.add_systems(
@@ -231,6 +241,10 @@ fn main() {
         execute_movement_actions,
         execute_communication_actions,
         execute_archive_actions,
+        execute_resource_actions,
+        execute_social_actions,
+        execute_faction_actions,
+        execute_conflict_actions,
     ).after(select_actions));
 
     // Trust systems run after action execution
@@ -238,7 +252,13 @@ fn main() {
     schedule.add_systems((
         process_trust_events,
         decay_grudges,
-    ).after(execute_communication_actions).after(execute_movement_actions).after(execute_archive_actions));
+    ).after(execute_communication_actions)
+     .after(execute_movement_actions)
+     .after(execute_archive_actions)
+     .after(execute_resource_actions)
+     .after(execute_social_actions)
+     .after(execute_faction_actions)
+     .after(execute_conflict_actions));
 
     // Ritual system runs after trust (rituals are periodic faction-wide events)
     schedule.add_systems(
@@ -274,18 +294,38 @@ fn main() {
                 let mut comm_count = 0;
                 let mut archive_count = 0;
                 let mut ritual_count = 0;
+                let mut resource_count = 0;
+                let mut social_count = 0;
+                let mut faction_count = 0;
+                let mut conflict_count = 0;
                 for event in &tick_events.events {
                     match event.event_type {
                         events::types::EventType::Movement => move_count += 1,
                         events::types::EventType::Communication => comm_count += 1,
                         events::types::EventType::Archive => archive_count += 1,
                         events::types::EventType::Ritual => ritual_count += 1,
+                        events::types::EventType::Resource => resource_count += 1,
+                        events::types::EventType::Cooperation => social_count += 1,
+                        events::types::EventType::Faction => faction_count += 1,
+                        events::types::EventType::Conflict => conflict_count += 1,
                         _ => {}
                     }
                 }
                 let mut extra = String::new();
                 if archive_count > 0 {
                     extra.push_str(&format!(", archive: {}", archive_count));
+                }
+                if resource_count > 0 {
+                    extra.push_str(&format!(", resource: {}", resource_count));
+                }
+                if social_count > 0 {
+                    extra.push_str(&format!(", social: {}", social_count));
+                }
+                if faction_count > 0 {
+                    extra.push_str(&format!(", FACTION: {}", faction_count));
+                }
+                if conflict_count > 0 {
+                    extra.push_str(&format!(", CONFLICT: {}", conflict_count));
                 }
                 if ritual_count > 0 {
                     extra.push_str(&format!(", RITUALS: {}", ritual_count));

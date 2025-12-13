@@ -3,22 +3,29 @@
 //! Executes selected actions and generates events.
 
 use bevy_ecs::prelude::*;
+use rand::Rng;
 
 use crate::actions::movement::{MoveAction, MovementType};
 use crate::actions::communication::{CommunicationAction, CommunicationType, TargetMode, communication_weights};
 use crate::actions::archive::{ArchiveAction, ArchiveActionType};
-use crate::components::agent::{AgentId, AgentName};
+use crate::actions::resource::{ResourceAction, ResourceActionType};
+use crate::actions::social::{SocialAction, SocialActionType, social_weights};
+use crate::actions::faction::{FactionAction, FactionActionType};
+use crate::actions::conflict::{ConflictAction, ConflictActionType, conflict_weights};
+use crate::components::agent::{AgentId, AgentName, Alive, Goals, GoalType, Needs, Role, SocialBelonging, Traits};
 use crate::components::social::{Memory, MemoryBank, MemorySource, MemoryValence, RelationshipGraph};
 use crate::components::world::{Position, WorldState};
 use crate::events::types::{
     ActorSnapshot, Event, EventActors, EventContext, EventOutcome, EventTimestamp, EventType,
     EventSubtype, MovementSubtype, MovementOutcome, CommunicationSubtype,
     CommunicationOutcome as EventCommunicationOutcome, MemorySharedInfo, RecipientStateChange,
-    ArchiveSubtype, ArchiveOutcome,
+    ArchiveSubtype, ArchiveOutcome, ResourceSubtype, CooperationSubtype, FactionSubtype,
+    ConflictSubtype, GeneralOutcome, RelationshipOutcome, RelationshipChange,
 };
-use crate::components::faction::{FactionRegistry, ArchiveEntry};
+use crate::components::faction::{FactionMembership, FactionRegistry, ArchiveEntry};
 use crate::systems::memory::calculate_secondhand_trust_impact;
 use crate::systems::perception::AgentsByLocation;
+use crate::SimRng;
 
 use super::generate::Action;
 use super::select::SelectedActions;
@@ -97,6 +104,18 @@ pub fn execute_movement_actions(
             }
             Action::Archive(_) => {
                 // Archive is handled by execute_archive_actions
+            }
+            Action::Resource(_) => {
+                // Resource actions are handled by execute_resource_actions
+            }
+            Action::Social(_) => {
+                // Social actions are handled by execute_social_actions
+            }
+            Action::Faction(_) => {
+                // Faction actions are handled by execute_faction_actions
+            }
+            Action::Conflict(_) => {
+                // Conflict actions are handled by execute_conflict_actions
             }
             Action::Idle => {
                 // No action needed for idle
@@ -746,6 +765,707 @@ fn create_archive_event(
             content: content.map(|s| s.to_string()),
             subject: subject.map(|s| s.to_string()),
             is_authentic,
+        }),
+        drama_tags,
+        drama_score,
+        connected_events: Vec::new(),
+    }
+}
+
+/// System to execute resource actions
+pub fn execute_resource_actions(
+    world_state: Res<WorldState>,
+    mut faction_registry: ResMut<FactionRegistry>,
+    mut selected_actions: ResMut<SelectedActions>,
+    mut tick_events: ResMut<TickEvents>,
+    query: Query<(&AgentId, &AgentName, &Position, &FactionMembership)>,
+) {
+    // Collect resource actions
+    let mut resource_actions: Vec<(String, ResourceAction, String, String, String)> = Vec::new();
+
+    for (agent_id, name, pos, membership) in query.iter() {
+        if let Some(action) = selected_actions.actions.get(&agent_id.0) {
+            if let Action::Resource(resource_action) = action {
+                resource_actions.push((
+                    agent_id.0.clone(),
+                    resource_action.clone(),
+                    name.0.clone(),
+                    pos.location_id.clone(),
+                    membership.faction_id.clone(),
+                ));
+            }
+        }
+    }
+
+    for (actor_id, action, actor_name, location, actor_faction) in resource_actions {
+        match action.action_type {
+            ResourceActionType::Work => {
+                // Add resources to faction
+                if let Some(faction) = faction_registry.get_mut(&actor_faction) {
+                    faction.resources.grain += action.amount;
+                }
+
+                let event = create_resource_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    ResourceSubtype::Work,
+                    action.amount,
+                    None,
+                );
+                tick_events.push(event);
+            }
+            ResourceActionType::Trade => {
+                // Simple trade event (actual resource exchange would need more logic)
+                let event = create_resource_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    ResourceSubtype::Trade,
+                    action.amount,
+                    action.target_id.as_deref(),
+                );
+                tick_events.push(event);
+            }
+            ResourceActionType::Steal => {
+                let event = create_resource_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    ResourceSubtype::Steal,
+                    action.amount,
+                    action.target_id.as_deref(),
+                );
+                tick_events.push(event);
+            }
+            ResourceActionType::Hoard => {
+                let event = create_resource_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    ResourceSubtype::Hoard,
+                    action.amount,
+                    None,
+                );
+                tick_events.push(event);
+            }
+        }
+    }
+}
+
+/// Create a resource event
+fn create_resource_event(
+    tick_events: &mut TickEvents,
+    world_state: &WorldState,
+    actor_id: &str,
+    actor_name: &str,
+    actor_faction: &str,
+    location: &str,
+    subtype: ResourceSubtype,
+    amount: u32,
+    target: Option<&str>,
+) -> Event {
+    let event_id = tick_events.generate_id();
+    let timestamp = EventTimestamp {
+        tick: world_state.current_tick,
+        date: world_state.formatted_date(),
+    };
+
+    let actor = ActorSnapshot {
+        agent_id: actor_id.to_string(),
+        name: actor_name.to_string(),
+        faction: actor_faction.to_string(),
+        role: "worker".to_string(),
+        location: location.to_string(),
+    };
+
+    let (trigger, drama_score) = match subtype {
+        ResourceSubtype::Work => ("productive_labor", 0.1),
+        ResourceSubtype::Trade => ("mutual_exchange", 0.2),
+        ResourceSubtype::Steal => ("theft", 0.5),
+        ResourceSubtype::Hoard => ("self_interest", 0.3),
+        _ => ("resource_action", 0.1),
+    };
+
+    Event {
+        event_id,
+        timestamp,
+        event_type: EventType::Resource,
+        subtype: EventSubtype::Resource(subtype),
+        actors: EventActors {
+            primary: actor,
+            secondary: None,
+            affected: None,
+        },
+        context: EventContext {
+            trigger: trigger.to_string(),
+            preconditions: Vec::new(),
+            location_description: Some(format!("at {}", location)),
+        },
+        outcome: EventOutcome::General(GeneralOutcome {
+            description: Some(format!("Resource action involving {} units", amount)),
+            state_changes: Vec::new(),
+        }),
+        drama_tags: Vec::new(),
+        drama_score,
+        connected_events: Vec::new(),
+    }
+}
+
+/// System to execute social actions
+pub fn execute_social_actions(
+    world_state: Res<WorldState>,
+    mut relationship_graph: ResMut<RelationshipGraph>,
+    mut selected_actions: ResMut<SelectedActions>,
+    mut tick_events: ResMut<TickEvents>,
+    query: Query<(&AgentId, &AgentName, &Position, &FactionMembership)>,
+) {
+    // Build agent info map
+    let agent_info: std::collections::HashMap<String, (&AgentName, &Position, &FactionMembership)> =
+        query.iter().map(|(id, name, pos, mem)| (id.0.clone(), (name, pos, mem))).collect();
+
+    // Collect social actions
+    let mut social_actions: Vec<(String, SocialAction, String, String, String)> = Vec::new();
+
+    for (agent_id, name, pos, membership) in query.iter() {
+        if let Some(action) = selected_actions.actions.get(&agent_id.0) {
+            if let Action::Social(social_action) = action {
+                social_actions.push((
+                    agent_id.0.clone(),
+                    social_action.clone(),
+                    name.0.clone(),
+                    pos.location_id.clone(),
+                    membership.faction_id.clone(),
+                ));
+            }
+        }
+    }
+
+    for (actor_id, action, actor_name, location, actor_faction) in social_actions {
+        let target_info = agent_info.get(&action.target_id);
+
+        match action.action_type {
+            SocialActionType::BuildTrust => {
+                // Update relationship
+                let rel = relationship_graph.ensure_relationship(&actor_id, &action.target_id);
+                let old_trust = rel.trust.overall();
+                rel.trust.update_reliability(social_weights::BUILD_TRUST_GAIN);
+                rel.last_interaction_tick = world_state.current_tick;
+                let new_trust = rel.trust.overall();
+
+                let event = create_social_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    CooperationSubtype::BuildTrust,
+                    &action.target_id,
+                    target_info.map(|(n, _, _)| n.0.as_str()),
+                    old_trust,
+                    new_trust,
+                );
+                tick_events.push(event);
+            }
+            SocialActionType::CurryFavor => {
+                let rel = relationship_graph.ensure_relationship(&actor_id, &action.target_id);
+                let old_trust = rel.trust.overall();
+                rel.trust.update_alignment(social_weights::CURRY_FAVOR_GAIN);
+                rel.last_interaction_tick = world_state.current_tick;
+                let new_trust = rel.trust.overall();
+
+                let event = create_social_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    CooperationSubtype::Favor,
+                    &action.target_id,
+                    target_info.map(|(n, _, _)| n.0.as_str()),
+                    old_trust,
+                    new_trust,
+                );
+                tick_events.push(event);
+            }
+            SocialActionType::Gift => {
+                let rel = relationship_graph.ensure_relationship(&actor_id, &action.target_id);
+                let old_trust = rel.trust.overall();
+                rel.trust.update_reliability(social_weights::GIFT_TRUST_GAIN);
+                rel.last_interaction_tick = world_state.current_tick;
+                let new_trust = rel.trust.overall();
+
+                let event = create_social_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    CooperationSubtype::Gift,
+                    &action.target_id,
+                    target_info.map(|(n, _, _)| n.0.as_str()),
+                    old_trust,
+                    new_trust,
+                );
+                tick_events.push(event);
+            }
+            SocialActionType::Ostracize => {
+                // Damage relationship
+                let rel = relationship_graph.ensure_relationship(&actor_id, &action.target_id);
+                let old_trust = rel.trust.overall();
+                rel.trust.update_alignment(-social_weights::OSTRACIZE_BELONGING_IMPACT);
+                let new_trust = rel.trust.overall();
+
+                let event = create_social_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    CooperationSubtype::BuildTrust, // No ostracize subtype, using generic
+                    &action.target_id,
+                    target_info.map(|(n, _, _)| n.0.as_str()),
+                    old_trust,
+                    new_trust,
+                );
+                tick_events.push(event);
+            }
+        }
+    }
+}
+
+/// Create a social/cooperation event
+fn create_social_event(
+    tick_events: &mut TickEvents,
+    world_state: &WorldState,
+    actor_id: &str,
+    actor_name: &str,
+    actor_faction: &str,
+    location: &str,
+    subtype: CooperationSubtype,
+    target_id: &str,
+    target_name: Option<&str>,
+    old_trust: f32,
+    new_trust: f32,
+) -> Event {
+    let event_id = tick_events.generate_id();
+    let timestamp = EventTimestamp {
+        tick: world_state.current_tick,
+        date: world_state.formatted_date(),
+    };
+
+    let actor = ActorSnapshot {
+        agent_id: actor_id.to_string(),
+        name: actor_name.to_string(),
+        faction: actor_faction.to_string(),
+        role: "member".to_string(),
+        location: location.to_string(),
+    };
+
+    let secondary = Some(ActorSnapshot {
+        agent_id: target_id.to_string(),
+        name: target_name.unwrap_or("unknown").to_string(),
+        faction: "unknown".to_string(),
+        role: "member".to_string(),
+        location: location.to_string(),
+    });
+
+    let (trigger, drama_score) = match subtype {
+        CooperationSubtype::BuildTrust => ("building_rapport", 0.15),
+        CooperationSubtype::Favor => ("seeking_favor", 0.2),
+        CooperationSubtype::Gift => ("generous_gift", 0.25),
+        _ => ("social_interaction", 0.15),
+    };
+
+    Event {
+        event_id,
+        timestamp,
+        event_type: EventType::Cooperation,
+        subtype: EventSubtype::Cooperation(subtype),
+        actors: EventActors {
+            primary: actor,
+            secondary,
+            affected: None,
+        },
+        context: EventContext {
+            trigger: trigger.to_string(),
+            preconditions: Vec::new(),
+            location_description: Some(format!("at {}", location)),
+        },
+        outcome: EventOutcome::Relationship(RelationshipOutcome {
+            relationship_changes: vec![RelationshipChange {
+                from: actor_id.to_string(),
+                to: target_id.to_string(),
+                dimension: "overall".to_string(),
+                old_value: old_trust,
+                new_value: new_trust,
+            }],
+            state_changes: Vec::new(),
+        }),
+        drama_tags: Vec::new(),
+        drama_score,
+        connected_events: Vec::new(),
+    }
+}
+
+/// System to execute faction political actions
+pub fn execute_faction_actions(
+    world_state: Res<WorldState>,
+    mut faction_registry: ResMut<FactionRegistry>,
+    mut selected_actions: ResMut<SelectedActions>,
+    mut tick_events: ResMut<TickEvents>,
+    mut query: Query<(&AgentId, &AgentName, &Position, &mut FactionMembership)>,
+) {
+    // Collect faction actions
+    let mut faction_actions: Vec<(String, FactionAction, String, String, String)> = Vec::new();
+
+    for (agent_id, name, pos, membership) in query.iter() {
+        if let Some(action) = selected_actions.actions.get(&agent_id.0) {
+            if let Action::Faction(faction_action) = action {
+                faction_actions.push((
+                    agent_id.0.clone(),
+                    faction_action.clone(),
+                    name.0.clone(),
+                    pos.location_id.clone(),
+                    membership.faction_id.clone(),
+                ));
+            }
+        }
+    }
+
+    for (actor_id, action, actor_name, location, actor_faction) in faction_actions {
+        match action.action_type {
+            FactionActionType::Defect => {
+                // Change faction membership (would need mutable query)
+                let event = create_faction_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    FactionSubtype::Leave,
+                    action.new_faction_id.as_deref(),
+                );
+                tick_events.push(event);
+            }
+            FactionActionType::Exile => {
+                let event = create_faction_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    FactionSubtype::Exile,
+                    Some(&action.target_id),
+                );
+                tick_events.push(event);
+            }
+            FactionActionType::ChallengeLeader => {
+                let event = create_faction_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    FactionSubtype::ChallengeLeader,
+                    None,
+                );
+                tick_events.push(event);
+            }
+            FactionActionType::SupportLeader => {
+                let event = create_faction_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    FactionSubtype::SupportLeader,
+                    None,
+                );
+                tick_events.push(event);
+            }
+        }
+    }
+}
+
+/// Create a faction event
+fn create_faction_event(
+    tick_events: &mut TickEvents,
+    world_state: &WorldState,
+    actor_id: &str,
+    actor_name: &str,
+    actor_faction: &str,
+    location: &str,
+    subtype: FactionSubtype,
+    target: Option<&str>,
+) -> Event {
+    let event_id = tick_events.generate_id();
+    let timestamp = EventTimestamp {
+        tick: world_state.current_tick,
+        date: world_state.formatted_date(),
+    };
+
+    let actor = ActorSnapshot {
+        agent_id: actor_id.to_string(),
+        name: actor_name.to_string(),
+        faction: actor_faction.to_string(),
+        role: "member".to_string(),
+        location: location.to_string(),
+    };
+
+    let (trigger, drama_score, mut drama_tags) = match subtype {
+        FactionSubtype::Leave => ("defection", 0.7, vec!["defection".to_string()]),
+        FactionSubtype::Exile => ("exile_order", 0.6, vec!["exile".to_string()]),
+        FactionSubtype::ChallengeLeader => ("leadership_challenge", 0.8, vec!["succession_crisis".to_string()]),
+        FactionSubtype::SupportLeader => ("loyalty_display", 0.3, Vec::new()),
+        _ => ("faction_action", 0.3, Vec::new()),
+    };
+
+    Event {
+        event_id,
+        timestamp,
+        event_type: EventType::Faction,
+        subtype: EventSubtype::Faction(subtype),
+        actors: EventActors {
+            primary: actor,
+            secondary: None,
+            affected: None,
+        },
+        context: EventContext {
+            trigger: trigger.to_string(),
+            preconditions: Vec::new(),
+            location_description: Some(format!("at {}", location)),
+        },
+        outcome: EventOutcome::General(GeneralOutcome {
+            description: target.map(|t| format!("Involving {}", t)),
+            state_changes: Vec::new(),
+        }),
+        drama_tags,
+        drama_score,
+        connected_events: Vec::new(),
+    }
+}
+
+/// System to execute conflict actions
+pub fn execute_conflict_actions(
+    mut rng: ResMut<SimRng>,
+    world_state: Res<WorldState>,
+    mut relationship_graph: ResMut<RelationshipGraph>,
+    mut selected_actions: ResMut<SelectedActions>,
+    mut tick_events: ResMut<TickEvents>,
+    query: Query<(&AgentId, &AgentName, &Position, &FactionMembership, &Traits)>,
+) {
+    // Build agent info map
+    let agent_info: std::collections::HashMap<String, (&AgentName, &FactionMembership, &Traits)> =
+        query.iter().map(|(id, name, _, mem, traits)| (id.0.clone(), (name, mem, traits))).collect();
+
+    // Collect conflict actions
+    let mut conflict_actions: Vec<(String, ConflictAction, String, String, String, f32)> = Vec::new();
+
+    for (agent_id, name, pos, membership, traits) in query.iter() {
+        if let Some(action) = selected_actions.actions.get(&agent_id.0) {
+            if let Action::Conflict(conflict_action) = action {
+                conflict_actions.push((
+                    agent_id.0.clone(),
+                    conflict_action.clone(),
+                    name.0.clone(),
+                    pos.location_id.clone(),
+                    membership.faction_id.clone(),
+                    traits.boldness,
+                ));
+            }
+        }
+    }
+
+    for (actor_id, action, actor_name, location, actor_faction, actor_boldness) in conflict_actions {
+        let target_info = agent_info.get(&action.target_id);
+
+        match action.action_type {
+            ConflictActionType::Argue => {
+                // Damage relationship
+                let rel = relationship_graph.ensure_relationship(&actor_id, &action.target_id);
+                rel.trust.update_alignment(-conflict_weights::ARGUE_RELATIONSHIP_DAMAGE);
+
+                // Check for resolution
+                let resolved = rng.0.gen::<f32>() < conflict_weights::ARGUE_RESOLUTION_CHANCE;
+
+                let event = create_conflict_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    ConflictSubtype::Argument,
+                    &action.target_id,
+                    target_info.map(|(n, _, _)| n.0.as_str()),
+                    resolved,
+                    false,
+                );
+                tick_events.push(event);
+            }
+            ConflictActionType::Fight => {
+                // Heavy relationship damage
+                let rel = relationship_graph.ensure_relationship(&actor_id, &action.target_id);
+                rel.trust.update_reliability(-conflict_weights::FIGHT_RELATIONSHIP_DAMAGE);
+                rel.trust.update_alignment(-conflict_weights::FIGHT_RELATIONSHIP_DAMAGE);
+
+                // Determine winner based on capability/boldness
+                let target_capability = target_info.map(|(_, _, t)| t.boldness).unwrap_or(0.5);
+                let actor_advantage = actor_boldness - target_capability;
+                let win_chance = 0.5 + actor_advantage * conflict_weights::FIGHT_CAPABILITY_MODIFIER;
+                let actor_wins = rng.0.gen::<f32>() < win_chance;
+
+                let event = create_conflict_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    ConflictSubtype::Fight,
+                    &action.target_id,
+                    target_info.map(|(n, _, _)| n.0.as_str()),
+                    false,
+                    actor_wins,
+                );
+                tick_events.push(event);
+            }
+            ConflictActionType::Sabotage => {
+                // Check if detected
+                let detected = rng.0.gen::<f32>() < conflict_weights::SABOTAGE_DETECTION_CHANCE;
+
+                if detected {
+                    // Heavy relationship damage if caught
+                    let rel = relationship_graph.ensure_relationship(&actor_id, &action.target_id);
+                    rel.trust.update_reliability(-conflict_weights::SABOTAGE_RELATIONSHIP_DAMAGE);
+                }
+
+                let event = create_conflict_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    ConflictSubtype::Raid, // Using Raid as closest to sabotage
+                    &action.target_id,
+                    target_info.map(|(n, _, _)| n.0.as_str()),
+                    !detected,
+                    !detected,
+                );
+                tick_events.push(event);
+            }
+            ConflictActionType::Assassinate => {
+                // Extremely dramatic - would set Alive to false on target
+                // For now, just generate event
+                let event = create_conflict_event(
+                    &mut tick_events,
+                    &world_state,
+                    &actor_id,
+                    &actor_name,
+                    &actor_faction,
+                    &location,
+                    ConflictSubtype::Assassination,
+                    &action.target_id,
+                    target_info.map(|(n, _, _)| n.0.as_str()),
+                    false,
+                    true, // Assassination attempt
+                );
+                tick_events.push(event);
+            }
+        }
+    }
+}
+
+/// Create a conflict event
+fn create_conflict_event(
+    tick_events: &mut TickEvents,
+    world_state: &WorldState,
+    actor_id: &str,
+    actor_name: &str,
+    actor_faction: &str,
+    location: &str,
+    subtype: ConflictSubtype,
+    target_id: &str,
+    target_name: Option<&str>,
+    resolved: bool,
+    actor_success: bool,
+) -> Event {
+    let event_id = tick_events.generate_id();
+    let timestamp = EventTimestamp {
+        tick: world_state.current_tick,
+        date: world_state.formatted_date(),
+    };
+
+    let actor = ActorSnapshot {
+        agent_id: actor_id.to_string(),
+        name: actor_name.to_string(),
+        faction: actor_faction.to_string(),
+        role: "combatant".to_string(),
+        location: location.to_string(),
+    };
+
+    let secondary = Some(ActorSnapshot {
+        agent_id: target_id.to_string(),
+        name: target_name.unwrap_or("unknown").to_string(),
+        faction: "unknown".to_string(),
+        role: "target".to_string(),
+        location: location.to_string(),
+    });
+
+    let (trigger, base_drama, mut drama_tags) = match subtype {
+        ConflictSubtype::Argument => ("heated_dispute", 0.3, vec!["conflict".to_string()]),
+        ConflictSubtype::Fight => ("physical_altercation", 0.6, vec!["violence".to_string()]),
+        ConflictSubtype::Raid => ("sabotage_attempt", 0.5, vec!["sabotage".to_string()]),
+        ConflictSubtype::Assassination => ("murder_attempt", 0.95, vec!["assassination".to_string(), "death".to_string()]),
+        _ => ("conflict", 0.4, vec!["conflict".to_string()]),
+    };
+
+    let drama_score = if actor_success { base_drama } else { base_drama * 0.8 };
+
+    Event {
+        event_id,
+        timestamp,
+        event_type: EventType::Conflict,
+        subtype: EventSubtype::Conflict(subtype),
+        actors: EventActors {
+            primary: actor,
+            secondary,
+            affected: None,
+        },
+        context: EventContext {
+            trigger: trigger.to_string(),
+            preconditions: Vec::new(),
+            location_description: Some(format!("at {}", location)),
+        },
+        outcome: EventOutcome::General(GeneralOutcome {
+            description: Some(if actor_success {
+                "Actor prevailed".to_string()
+            } else {
+                "Conflict unresolved".to_string()
+            }),
+            state_changes: Vec::new(),
         }),
         drama_tags,
         drama_score,

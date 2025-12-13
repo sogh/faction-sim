@@ -128,8 +128,12 @@ mod tests {
             match &selected.action {
                 Action::Idle => idle_count += 1,
                 Action::Move(_) => move_count += 1,
-                Action::Communicate(_) => {} // Not used in this test
-                Action::Archive(_) => {} // Not used in this test
+                Action::Communicate(_) => {}
+                Action::Archive(_) => {}
+                Action::Resource(_) => {}
+                Action::Social(_) => {}
+                Action::Faction(_) => {}
+                Action::Conflict(_) => {}
             }
         }
 

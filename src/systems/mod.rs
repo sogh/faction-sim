@@ -19,8 +19,10 @@ pub use needs::{
 pub use action::{
     Action, PendingActions, SelectedActions, TickEvents, WeightedAction,
     generate_movement_actions, generate_patrol_actions, generate_communication_actions, generate_archive_actions,
+    generate_resource_actions, generate_social_actions, generate_faction_actions, generate_conflict_actions,
     apply_trait_weights, add_noise_to_weights, select_actions,
     execute_movement_actions, execute_communication_actions, execute_archive_actions,
+    execute_resource_actions, execute_social_actions, execute_faction_actions, execute_conflict_actions,
 };
 pub use memory::{
     decay_memories, cleanup_memories, SeasonTracker,

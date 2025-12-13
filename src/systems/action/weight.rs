@@ -7,6 +7,10 @@ use bevy_ecs::prelude::*;
 use crate::actions::movement::MovementType;
 use crate::actions::communication::{CommunicationType, TargetMode, communication_weights};
 use crate::actions::archive::{ArchiveAction, ArchiveActionType, archive_weights};
+use crate::actions::resource::{ResourceAction, ResourceActionType};
+use crate::actions::social::{SocialAction, SocialActionType};
+use crate::actions::faction::{FactionAction, FactionActionType};
+use crate::actions::conflict::{ConflictAction, ConflictActionType};
 use crate::components::agent::{AgentId, FoodSecurity, Needs, Role, SocialBelonging, Traits};
 use crate::components::faction::{FactionMembership, FactionRegistry};
 use crate::components::social::{MemoryValence, RelationshipGraph};
@@ -55,6 +59,18 @@ fn calculate_weight_modifier(
         }
         Action::Archive(archive_action) => {
             calculate_archive_modifier(archive_action, traits, needs, membership)
+        }
+        Action::Resource(resource_action) => {
+            calculate_resource_modifier(resource_action, traits, needs, membership)
+        }
+        Action::Social(social_action) => {
+            calculate_social_modifier(social_action, traits, needs, membership)
+        }
+        Action::Faction(faction_action) => {
+            calculate_faction_modifier(faction_action, traits, needs, membership)
+        }
+        Action::Conflict(conflict_action) => {
+            calculate_conflict_modifier(conflict_action, traits, needs, membership)
         }
         Action::Idle => calculate_idle_modifier(traits, needs),
     }
@@ -225,6 +241,187 @@ fn calculate_idle_modifier(traits: &Traits, needs: &Needs) -> f32 {
     }
 
     modifier
+}
+
+/// Calculate resource action weight modifier
+fn calculate_resource_modifier(
+    action: &ResourceAction,
+    traits: &Traits,
+    needs: &Needs,
+    membership: &FactionMembership,
+) -> f32 {
+    let mut modifier = 1.0;
+
+    match action.action_type {
+        ResourceActionType::Work => {
+            // Loyal agents more likely to work for faction
+            modifier *= 0.7 + traits.loyalty_weight * 0.6;
+            // Desperate agents work harder
+            if needs.food_security == FoodSecurity::Desperate {
+                modifier *= 1.5;
+            }
+        }
+        ResourceActionType::Trade => {
+            // Sociable agents trade more
+            modifier *= 0.8 + traits.sociability * 0.4;
+        }
+        ResourceActionType::Steal => {
+            // Low honesty enables stealing
+            modifier *= 1.5 - traits.honesty;
+            // Bold agents steal more
+            modifier *= 0.5 + traits.boldness * 0.5;
+            // Low loyalty reduces inhibition
+            modifier *= 1.3 - traits.loyalty_weight * 0.3;
+        }
+        ResourceActionType::Hoard => {
+            // Low loyalty = more hoarding
+            modifier *= 1.5 - traits.loyalty_weight;
+            // Low honesty helps justify hoarding
+            modifier *= 1.0 + (1.0 - traits.honesty) * 0.3;
+        }
+    }
+
+    modifier.max(0.1)
+}
+
+/// Calculate social action weight modifier
+fn calculate_social_modifier(
+    action: &SocialAction,
+    traits: &Traits,
+    needs: &Needs,
+    _membership: &FactionMembership,
+) -> f32 {
+    let mut modifier = 1.0;
+
+    match action.action_type {
+        SocialActionType::BuildTrust => {
+            // Sociable agents build trust more
+            modifier *= 0.6 + traits.sociability * 0.8;
+            // Isolated agents are motivated to connect
+            if needs.social_belonging == SocialBelonging::Isolated {
+                modifier *= 1.4;
+            }
+        }
+        SocialActionType::CurryFavor => {
+            // Ambitious agents curry favor more
+            modifier *= 0.5 + traits.ambition * 1.0;
+            // Sociable agents are better at it
+            modifier *= 0.8 + traits.sociability * 0.4;
+        }
+        SocialActionType::Gift => {
+            // Sociable agents give gifts more
+            modifier *= 0.7 + traits.sociability * 0.6;
+            // Generous (less ambitious) agents give more
+            modifier *= 1.2 - traits.ambition * 0.2;
+        }
+        SocialActionType::Ostracize => {
+            // Low honesty enables cruel behavior
+            modifier *= 1.2 - traits.honesty * 0.4;
+            // Bold agents are more willing to ostracize
+            modifier *= 0.7 + traits.boldness * 0.6;
+            // Low sociability correlates with ostracizing
+            modifier *= 1.2 - traits.sociability * 0.2;
+        }
+    }
+
+    modifier.max(0.1)
+}
+
+/// Calculate faction action weight modifier
+fn calculate_faction_modifier(
+    action: &FactionAction,
+    traits: &Traits,
+    needs: &Needs,
+    membership: &FactionMembership,
+) -> f32 {
+    let mut modifier = 1.0;
+
+    match action.action_type {
+        FactionActionType::Defect => {
+            // Low loyalty enables defection
+            modifier *= 2.0 - traits.loyalty_weight * 1.5;
+            // Bold agents are more willing to defect
+            modifier *= 0.5 + traits.boldness * 0.5;
+            // Isolated agents more likely to seek new home
+            if needs.social_belonging == SocialBelonging::Isolated {
+                modifier *= 2.0;
+            }
+        }
+        FactionActionType::Exile => {
+            // Leaders/council can exile
+            if !matches!(membership.role, Role::Leader | Role::CouncilMember) {
+                modifier *= 0.01; // Basically zero for non-authorities
+            }
+            // Bold leaders exile more readily
+            modifier *= 0.7 + traits.boldness * 0.6;
+        }
+        FactionActionType::ChallengeLeader => {
+            // Ambition is primary driver
+            modifier *= 0.3 + traits.ambition * 1.4;
+            // Low loyalty enables challenging
+            modifier *= 1.3 - traits.loyalty_weight * 0.5;
+            // Bold agents challenge more
+            modifier *= 0.6 + traits.boldness * 0.8;
+        }
+        FactionActionType::SupportLeader => {
+            // Loyal agents support leader
+            modifier *= 0.5 + traits.loyalty_weight * 1.0;
+            // Low ambition = more support for current leader
+            modifier *= 1.2 - traits.ambition * 0.3;
+        }
+    }
+
+    modifier.max(0.01)
+}
+
+/// Calculate conflict action weight modifier
+fn calculate_conflict_modifier(
+    action: &ConflictAction,
+    traits: &Traits,
+    needs: &Needs,
+    _membership: &FactionMembership,
+) -> f32 {
+    let mut modifier = 1.0;
+
+    match action.action_type {
+        ConflictActionType::Argue => {
+            // Bold agents argue more readily
+            modifier *= 0.6 + traits.boldness * 0.8;
+            // Low sociability correlates with arguments
+            modifier *= 1.2 - traits.sociability * 0.2;
+        }
+        ConflictActionType::Fight => {
+            // Boldness is primary driver for violence
+            modifier *= 0.3 + traits.boldness * 1.4;
+            // Low sociability
+            modifier *= 1.2 - traits.sociability * 0.3;
+            // Desperate agents fight more
+            if needs.food_security == FoodSecurity::Desperate {
+                modifier *= 1.5;
+            }
+        }
+        ConflictActionType::Sabotage => {
+            // Low honesty enables sabotage
+            modifier *= 1.5 - traits.honesty;
+            // Low boldness (sneaky) helps
+            modifier *= 1.0 - traits.boldness * 0.3;
+            // High grudge persistence fuels sabotage
+            modifier *= 0.7 + traits.grudge_persistence * 0.6;
+        }
+        ConflictActionType::Assassinate => {
+            // Extremely rare - only desperate situations
+            modifier *= 0.5 + traits.boldness * 0.5;
+            modifier *= 1.5 - traits.honesty * 0.5;
+            // High grudge persistence
+            modifier *= 0.5 + traits.grudge_persistence * 1.0;
+            // Isolated agents more likely
+            if needs.social_belonging == SocialBelonging::Isolated {
+                modifier *= 2.0;
+            }
+        }
+    }
+
+    modifier.max(0.001)
 }
 
 #[cfg(test)]
