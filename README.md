@@ -356,10 +356,6 @@ The simulation engine is fully functional with all major systems implemented:
 
 **98 tests** covering core functionality and determinism verification.
 
-## License
-
-MIT
-
 ---
 
 *Built with Claude Code, December 2024-2025*
