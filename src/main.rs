@@ -10,12 +10,12 @@ use rand::SeedableRng;
 use std::fs;
 use std::path::Path;
 
-mod components;
-mod systems;
-mod events;
-mod actions;
-mod output;
-mod setup;
+// Use the library's modules instead of local duplicates to avoid type mismatches
+use emergent_sim::components;
+use emergent_sim::systems;
+use emergent_sim::events;
+use emergent_sim::output;
+use emergent_sim::setup;
 
 use systems::{
     AgentsByLocation, InteractionTracker, RitualAttendance, SeasonTracker, TrustEventQueue,
@@ -32,6 +32,8 @@ use systems::{
     execute_movement_actions, execute_communication_actions, execute_archive_actions,
     execute_resource_actions, execute_social_actions, execute_faction_actions, execute_conflict_actions,
 };
+
+use emergent_sim::interventions::{PendingInterventions, scan_interventions, apply_interventions};
 
 pub use components::*;
 
@@ -142,6 +144,9 @@ fn main() {
     // Initialize tension stream for Director AI
     world.insert_resource(output::TensionStream::new());
 
+    // Initialize intervention system
+    world.insert_resource(PendingInterventions::new());
+
     // Spawn agents
     println!("Spawning agents...");
     {
@@ -180,11 +185,17 @@ fn main() {
     let mut schedule = Schedule::default();
 
     // Add systems to the schedule
-    // Perception systems run first to update awareness
+    // Intervention systems run first to apply any pending modifications
+    schedule.add_systems((
+        scan_interventions,
+        apply_interventions,
+    ).chain());
+
+    // Perception systems run after interventions to update awareness
     schedule.add_systems((
         build_location_index,
         update_perception,
-    ).chain());
+    ).chain().after(apply_interventions));
 
     // Needs systems run after perception
     schedule.add_systems((

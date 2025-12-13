@@ -11,6 +11,7 @@ pub mod events;
 pub mod actions;
 pub mod output;
 pub mod setup;
+pub mod interventions;
 
 pub use components::*;
 
