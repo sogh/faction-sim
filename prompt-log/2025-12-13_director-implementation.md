@@ -80,3 +80,37 @@ Implemented template-based commentary generation in `src/commentary.rs`:
 
 **Tests**: 90 total (16 new commentary tests)
 
+### Prompt 7: Irony Detection
+**Started**: 2025-12-14
+**Completed**: 2025-12-14
+
+Extended `src/commentary.rs` with dramatic irony detection:
+- `BetrayalRecord` struct:
+  - `event_id`, `betrayer_id`, `betrayer_name`
+  - `affected_ids`: agents who don't know about the betrayal
+  - `tick`, `location`
+  - `discovered_by`: HashSet of agents who learned the truth
+  - `from_event()` factory method
+  - `is_discovered_by()`, `is_fully_discovered()` helpers
+- `IronyDetector` struct:
+  - `recent_betrayals`: Vec<BetrayalRecord>
+  - `trust_threshold`: f32 (default 0.5)
+  - `record_betrayal(&mut self, event: &Event)` - tracks betrayal events
+  - `detect_irony(&self, state: &WorldSnapshot) -> Vec<IronySituation>`
+    - Checks relationship.reliability against threshold
+    - Creates irony situation when affected agent still trusts betrayer
+  - `mark_discovered()` - marks betrayal as known by an agent
+  - `cleanup()` - removes old or fully discovered betrayals
+- Updated `IronySituation`:
+  - Added `unaware_agent_id` and `betrayer_id` fields
+  - Added `unaware_of_betrayal()` constructor
+- 12 new unit tests:
+  - Betrayal creates irony situation when trust is high
+  - Irony clears when trust drops below threshold
+  - mark_discovered removes irony for that agent
+  - Multiple affected agents create separate situations
+  - Cleanup removes old and fully discovered betrayals
+  - BetrayalRecord helper methods
+
+**Tests**: 102 total (12 new irony detection tests)
+

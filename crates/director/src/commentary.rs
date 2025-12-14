@@ -3,12 +3,12 @@
 //! Generates text overlays and captions for the visualization based on
 //! events, tensions, and dramatic irony situations.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
-use sim_events::{Event, EventSubtype, EventType, Tension};
+use sim_events::{Event, EventSubtype, EventType, Tension, WorldSnapshot};
 
 use crate::config::CommentaryConfig;
 use crate::output::{generate_commentary_id, CommentaryItem, CommentaryType};
@@ -100,14 +100,234 @@ pub struct IronySituation {
     pub situation_type: String,
     /// Agent who is unaware
     pub unaware_agent_name: String,
+    /// ID of the unaware agent
+    pub unaware_agent_id: String,
     /// Agent who did the betrayal (if applicable)
     pub betrayer_name: Option<String>,
+    /// ID of the betrayer
+    pub betrayer_id: Option<String>,
     /// The secret information
     pub secret_info: String,
     /// Location where betrayal occurred (if applicable)
     pub betrayal_location: Option<String>,
     /// Related event ID
     pub betrayal_event_id: Option<String>,
+}
+
+impl IronySituation {
+    /// Creates a new irony situation for an unaware betrayal.
+    pub fn unaware_of_betrayal(
+        unaware_agent_id: impl Into<String>,
+        unaware_agent_name: impl Into<String>,
+        betrayer_id: impl Into<String>,
+        betrayer_name: impl Into<String>,
+        betrayal_event_id: impl Into<String>,
+        betrayal_location: Option<String>,
+    ) -> Self {
+        Self {
+            situation_type: "unaware_of_betrayal".to_string(),
+            unaware_agent_name: unaware_agent_name.into(),
+            unaware_agent_id: unaware_agent_id.into(),
+            betrayer_name: Some(betrayer_name.into()),
+            betrayer_id: Some(betrayer_id.into()),
+            secret_info: "betrayal".to_string(),
+            betrayal_location,
+            betrayal_event_id: Some(betrayal_event_id.into()),
+        }
+    }
+}
+
+/// Record of a betrayal event for irony tracking.
+#[derive(Debug, Clone)]
+pub struct BetrayalRecord {
+    /// The event ID of the betrayal
+    pub event_id: String,
+    /// ID of the agent who betrayed
+    pub betrayer_id: String,
+    /// Name of the betrayer
+    pub betrayer_name: String,
+    /// IDs of agents affected by the betrayal
+    pub affected_ids: Vec<String>,
+    /// Tick when the betrayal occurred
+    pub tick: u64,
+    /// Location where the betrayal occurred
+    pub location: Option<String>,
+    /// Agents who have discovered this betrayal
+    pub discovered_by: HashSet<String>,
+}
+
+impl BetrayalRecord {
+    /// Creates a new betrayal record from an event.
+    pub fn from_event(event: &Event) -> Option<Self> {
+        // Only process betrayal events
+        if event.event_type != EventType::Betrayal {
+            return None;
+        }
+
+        let betrayer_id = event.actors.primary.agent_id.clone();
+        let betrayer_name = event.actors.primary.name.clone();
+        let location = Some(event.actors.primary.location.clone());
+
+        // Affected agents are:
+        // 1. The secondary actor (if any)
+        // 2. All explicitly affected actors
+        // 3. Potentially all members of the betrayer's faction (simplified: just use affected list)
+        let affected_ids: Vec<String> = event
+            .actors
+            .affected
+            .iter()
+            .map(|a| a.agent_id.clone())
+            .collect();
+
+        // If there's a secondary actor who isn't the betrayer, they're not "affected" in the same way
+        // The secondary is typically the one receiving the secret, not someone being betrayed
+        // So we don't add them to affected_ids
+
+        // If no explicit affected agents, this betrayal doesn't have trackable victims
+        // (e.g., defection might affect the whole faction, but we'd need more context)
+        if affected_ids.is_empty() {
+            // Fall back: anyone in the betrayer's faction who isn't the betrayer is affected
+            // For now, we'll just return None if there are no explicitly affected agents
+            // In a real implementation, we'd look up faction members
+            return None;
+        }
+
+        Some(Self {
+            event_id: event.event_id.clone(),
+            betrayer_id,
+            betrayer_name,
+            affected_ids,
+            tick: event.timestamp.tick,
+            location,
+            discovered_by: HashSet::new(),
+        })
+    }
+
+    /// Checks if a specific agent has discovered this betrayal.
+    pub fn is_discovered_by(&self, agent_id: &str) -> bool {
+        self.discovered_by.contains(agent_id)
+    }
+
+    /// Checks if all affected agents have discovered this betrayal.
+    pub fn is_fully_discovered(&self) -> bool {
+        self.affected_ids.iter().all(|id| self.discovered_by.contains(id))
+    }
+}
+
+/// Detects dramatic irony situations based on betrayals and trust relationships.
+#[derive(Debug, Clone, Default)]
+pub struct IronyDetector {
+    /// Recent betrayals that may create irony situations
+    recent_betrayals: Vec<BetrayalRecord>,
+    /// Trust threshold below which an agent is considered to have "discovered" betrayal
+    trust_threshold: f32,
+}
+
+impl IronyDetector {
+    /// Creates a new irony detector with default settings.
+    pub fn new() -> Self {
+        Self {
+            recent_betrayals: Vec::new(),
+            trust_threshold: 0.5,
+        }
+    }
+
+    /// Creates a new irony detector with a custom trust threshold.
+    pub fn with_trust_threshold(trust_threshold: f32) -> Self {
+        Self {
+            recent_betrayals: Vec::new(),
+            trust_threshold,
+        }
+    }
+
+    /// Records a betrayal event for tracking.
+    ///
+    /// Only betrayal-type events will be recorded.
+    pub fn record_betrayal(&mut self, event: &Event) {
+        if let Some(record) = BetrayalRecord::from_event(event) {
+            self.recent_betrayals.push(record);
+        }
+    }
+
+    /// Marks a betrayal as discovered by an agent.
+    ///
+    /// This should be called when an agent learns about a betrayal through
+    /// communication, observation, or trust erosion.
+    pub fn mark_discovered(&mut self, betrayal_event_id: &str, discoverer_id: &str) {
+        for record in &mut self.recent_betrayals {
+            if record.event_id == betrayal_event_id {
+                record.discovered_by.insert(discoverer_id.to_string());
+                break;
+            }
+        }
+    }
+
+    /// Detects irony situations based on current world state.
+    ///
+    /// Detection logic for "unaware_of_betrayal":
+    /// 1. For each recorded betrayal not yet discovered by affected parties
+    /// 2. Check if any affected agent still has high trust in the betrayer
+    /// 3. If reliability trust > threshold, they're still unaware = irony opportunity
+    pub fn detect_irony(&self, state: &WorldSnapshot) -> Vec<IronySituation> {
+        let mut situations = Vec::new();
+
+        for record in &self.recent_betrayals {
+            // Skip fully discovered betrayals
+            if record.is_fully_discovered() {
+                continue;
+            }
+
+            // Check each affected agent
+            for affected_id in &record.affected_ids {
+                // Skip if this agent already discovered the betrayal
+                if record.is_discovered_by(affected_id) {
+                    continue;
+                }
+
+                // Check the trust relationship from affected -> betrayer
+                if let Some(relationship) = state.get_relationship(affected_id, &record.betrayer_id) {
+                    // If they still trust the betrayer, there's irony
+                    if relationship.reliability > self.trust_threshold {
+                        // Get the agent's name for the situation
+                        let agent_name = state
+                            .find_agent(affected_id)
+                            .map(|a| a.name.clone())
+                            .unwrap_or_else(|| affected_id.clone());
+
+                        situations.push(IronySituation::unaware_of_betrayal(
+                            affected_id,
+                            agent_name,
+                            &record.betrayer_id,
+                            &record.betrayer_name,
+                            &record.event_id,
+                            record.location.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        situations
+    }
+
+    /// Cleans up old betrayal records.
+    ///
+    /// Removes fully discovered betrayals and those older than max_age_ticks.
+    pub fn cleanup(&mut self, current_tick: u64, max_age_ticks: u64) {
+        self.recent_betrayals.retain(|record| {
+            !record.is_fully_discovered() && current_tick - record.tick < max_age_ticks
+        });
+    }
+
+    /// Returns the number of tracked betrayals.
+    pub fn betrayal_count(&self) -> usize {
+        self.recent_betrayals.len()
+    }
+
+    /// Returns a reference to all betrayal records.
+    pub fn betrayals(&self) -> &[BetrayalRecord] {
+        &self.recent_betrayals
+    }
 }
 
 /// Errors that can occur during template operations.
@@ -717,8 +937,8 @@ min_severity = 0.4
 mod tests {
     use super::*;
     use sim_events::{
-        ActorSet, ActorSnapshot, BetrayalSubtype, EventContext, EventOutcome, GeneralOutcome,
-        MovementSubtype, Season, SimTimestamp, TensionStatus, TensionType,
+        ActorSet, ActorSnapshot, AffectedActor, BetrayalSubtype, EventContext, EventOutcome,
+        GeneralOutcome, MovementSubtype, Season, SimTimestamp, TensionStatus, TensionType,
     };
 
     fn test_timestamp() -> SimTimestamp {
@@ -874,7 +1094,9 @@ mod tests {
         let situation = IronySituation {
             situation_type: "unaware_of_betrayal".to_string(),
             unaware_agent_name: "Corin".to_string(),
+            unaware_agent_id: "agent_corin".to_string(),
             betrayer_name: Some("Mira".to_string()),
+            betrayer_id: Some("agent_mira".to_string()),
             secret_info: "the secret meeting".to_string(),
             betrayal_location: Some("eastern_bridge".to_string()),
             betrayal_event_id: Some("evt_00001".to_string()),
@@ -963,7 +1185,9 @@ mod tests {
         let situation = IronySituation {
             situation_type: "unaware_of_betrayal".to_string(),
             unaware_agent_name: "Corin".to_string(),
+            unaware_agent_id: "agent_corin".to_string(),
             betrayer_name: Some("Mira".to_string()),
+            betrayer_id: Some("agent_mira".to_string()),
             secret_info: "secret".to_string(),
             betrayal_location: None,
             betrayal_event_id: None,
@@ -1003,5 +1227,292 @@ mod tests {
         // Should not find non-existent
         let missing = templates.get_event_templates("betrayal", "nonexistent");
         assert!(missing.is_none());
+    }
+
+    // ============ IronyDetector Tests ============
+
+    fn make_betrayal_event_with_affected() -> Event {
+        let primary = ActorSnapshot::new(
+            "agent_mira",
+            "Mira of Thornwood",
+            "thornwood",
+            "scout",
+            "eastern_bridge",
+        );
+        let secondary = ActorSnapshot::new(
+            "agent_voss",
+            "Voss the Quiet",
+            "ironmere",
+            "spymaster",
+            "eastern_bridge",
+        );
+        let affected = AffectedActor::new(
+            "agent_corin",
+            "Corin",
+            "thornwood",
+            "leader",
+        );
+
+        let mut actors = ActorSet::with_secondary(primary, secondary);
+        actors.affected.push(affected);
+
+        Event {
+            event_id: "evt_00001".to_string(),
+            timestamp: test_timestamp(),
+            event_type: EventType::Betrayal,
+            subtype: EventSubtype::Betrayal(BetrayalSubtype::SecretSharedWithEnemy),
+            actors,
+            context: EventContext::new("trust_eroded"),
+            outcome: EventOutcome::General(GeneralOutcome::default()),
+            drama_tags: vec!["betrayal".to_string()],
+            drama_score: 0.85,
+            connected_events: vec![],
+        }
+    }
+
+    fn make_world_snapshot_with_trust(
+        affected_id: &str,
+        betrayer_id: &str,
+        trust_level: f32,
+    ) -> WorldSnapshot {
+        use sim_events::{RelationshipSnapshot, AgentSnapshot as SnapshotAgent};
+
+        let ts = test_timestamp();
+        let mut snapshot = WorldSnapshot::new("snap_000001", ts, "test");
+
+        // Add agents
+        snapshot.agents.push(SnapshotAgent::new(
+            affected_id,
+            "Corin",
+            "thornwood",
+            "leader",
+            "thornwood_hall",
+        ));
+        snapshot.agents.push(SnapshotAgent::new(
+            betrayer_id,
+            "Mira",
+            "thornwood",
+            "scout",
+            "eastern_bridge",
+        ));
+
+        // Add relationship from affected -> betrayer
+        let mut affected_relationships = HashMap::new();
+        affected_relationships.insert(
+            betrayer_id.to_string(),
+            RelationshipSnapshot::new(trust_level, 0.5, 0.5),
+        );
+        snapshot.relationships.insert(affected_id.to_string(), affected_relationships);
+
+        snapshot
+    }
+
+    #[test]
+    fn test_irony_detector_creation() {
+        let detector = IronyDetector::new();
+        assert_eq!(detector.betrayal_count(), 0);
+    }
+
+    #[test]
+    fn test_irony_detector_record_betrayal() {
+        let mut detector = IronyDetector::new();
+        let event = make_betrayal_event_with_affected();
+
+        detector.record_betrayal(&event);
+        assert_eq!(detector.betrayal_count(), 1);
+
+        let records = detector.betrayals();
+        assert_eq!(records[0].betrayer_id, "agent_mira");
+        assert!(records[0].affected_ids.contains(&"agent_corin".to_string()));
+    }
+
+    #[test]
+    fn test_irony_detector_ignores_non_betrayal() {
+        let mut detector = IronyDetector::new();
+        let event = make_movement_event();
+
+        detector.record_betrayal(&event);
+        assert_eq!(detector.betrayal_count(), 0);
+    }
+
+    #[test]
+    fn test_betrayal_creates_irony_situation() {
+        let mut detector = IronyDetector::new();
+        let event = make_betrayal_event_with_affected();
+        detector.record_betrayal(&event);
+
+        // Create world state where Corin still trusts Mira
+        let state = make_world_snapshot_with_trust("agent_corin", "agent_mira", 0.8);
+
+        let situations = detector.detect_irony(&state);
+        assert_eq!(situations.len(), 1);
+        assert_eq!(situations[0].situation_type, "unaware_of_betrayal");
+        assert_eq!(situations[0].unaware_agent_id, "agent_corin");
+        assert_eq!(situations[0].betrayer_id, Some("agent_mira".to_string()));
+    }
+
+    #[test]
+    fn test_irony_clears_when_trust_drops() {
+        let mut detector = IronyDetector::new();
+        let event = make_betrayal_event_with_affected();
+        detector.record_betrayal(&event);
+
+        // Create world state where Corin no longer trusts Mira
+        let state = make_world_snapshot_with_trust("agent_corin", "agent_mira", 0.3);
+
+        let situations = detector.detect_irony(&state);
+        assert!(situations.is_empty()); // No irony - trust is low
+    }
+
+    #[test]
+    fn test_mark_discovered_removes_irony() {
+        let mut detector = IronyDetector::new();
+        let event = make_betrayal_event_with_affected();
+        detector.record_betrayal(&event);
+
+        // Mark as discovered by Corin
+        detector.mark_discovered("evt_00001", "agent_corin");
+
+        // Even with high trust, no irony because it's discovered
+        let state = make_world_snapshot_with_trust("agent_corin", "agent_mira", 0.9);
+        let situations = detector.detect_irony(&state);
+        assert!(situations.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_affected_agents() {
+        let mut detector = IronyDetector::new();
+
+        // Create event with multiple affected agents
+        let primary = ActorSnapshot::new(
+            "agent_mira",
+            "Mira",
+            "thornwood",
+            "scout",
+            "eastern_bridge",
+        );
+        let secondary = ActorSnapshot::new(
+            "agent_voss",
+            "Voss",
+            "ironmere",
+            "spymaster",
+            "eastern_bridge",
+        );
+
+        let mut actors = ActorSet::with_secondary(primary, secondary);
+        actors.affected.push(AffectedActor::new(
+            "agent_corin", "Corin", "thornwood", "leader"
+        ));
+        actors.affected.push(AffectedActor::new(
+            "agent_elena", "Elena", "thornwood", "scout"
+        ));
+
+        let event = Event {
+            event_id: "evt_00002".to_string(),
+            timestamp: test_timestamp(),
+            event_type: EventType::Betrayal,
+            subtype: EventSubtype::Betrayal(BetrayalSubtype::SecretSharedWithEnemy),
+            actors,
+            context: EventContext::new("trust_eroded"),
+            outcome: EventOutcome::General(GeneralOutcome::default()),
+            drama_tags: vec![],
+            drama_score: 0.8,
+            connected_events: vec![],
+        };
+
+        detector.record_betrayal(&event);
+
+        // Both agents trust Mira
+        let ts = test_timestamp();
+        let mut state = WorldSnapshot::new("snap_001", ts, "test");
+
+        use sim_events::{RelationshipSnapshot, AgentSnapshot as SnapshotAgent};
+
+        state.agents.push(SnapshotAgent::new("agent_corin", "Corin", "thornwood", "leader", "hall"));
+        state.agents.push(SnapshotAgent::new("agent_elena", "Elena", "thornwood", "scout", "market"));
+        state.agents.push(SnapshotAgent::new("agent_mira", "Mira", "thornwood", "scout", "bridge"));
+
+        let mut corin_rels = HashMap::new();
+        corin_rels.insert("agent_mira".to_string(), RelationshipSnapshot::new(0.8, 0.5, 0.5));
+        state.relationships.insert("agent_corin".to_string(), corin_rels);
+
+        let mut elena_rels = HashMap::new();
+        elena_rels.insert("agent_mira".to_string(), RelationshipSnapshot::new(0.7, 0.5, 0.5));
+        state.relationships.insert("agent_elena".to_string(), elena_rels);
+
+        let situations = detector.detect_irony(&state);
+        assert_eq!(situations.len(), 2); // Both have irony situations
+    }
+
+    #[test]
+    fn test_cleanup_old_betrayals() {
+        let mut detector = IronyDetector::new();
+        let event = make_betrayal_event_with_affected();
+        detector.record_betrayal(&event);
+
+        assert_eq!(detector.betrayal_count(), 1);
+
+        // Cleanup with max age that would expire our betrayal (tick 1000)
+        detector.cleanup(2000, 500); // Current tick 2000, max age 500
+        assert_eq!(detector.betrayal_count(), 0);
+    }
+
+    #[test]
+    fn test_cleanup_fully_discovered() {
+        let mut detector = IronyDetector::new();
+        let event = make_betrayal_event_with_affected();
+        detector.record_betrayal(&event);
+
+        // Mark as discovered
+        detector.mark_discovered("evt_00001", "agent_corin");
+
+        // Cleanup should remove fully discovered betrayals
+        detector.cleanup(1001, 100000); // Recent enough, but fully discovered
+        assert_eq!(detector.betrayal_count(), 0);
+    }
+
+    #[test]
+    fn test_betrayal_record_is_discovered_by() {
+        let event = make_betrayal_event_with_affected();
+        let mut record = BetrayalRecord::from_event(&event).unwrap();
+
+        assert!(!record.is_discovered_by("agent_corin"));
+
+        record.discovered_by.insert("agent_corin".to_string());
+        assert!(record.is_discovered_by("agent_corin"));
+    }
+
+    #[test]
+    fn test_betrayal_record_is_fully_discovered() {
+        let event = make_betrayal_event_with_affected();
+        let mut record = BetrayalRecord::from_event(&event).unwrap();
+
+        assert!(!record.is_fully_discovered());
+
+        // Discover by all affected agents
+        for id in record.affected_ids.clone() {
+            record.discovered_by.insert(id);
+        }
+
+        assert!(record.is_fully_discovered());
+    }
+
+    #[test]
+    fn test_irony_situation_constructor() {
+        let situation = IronySituation::unaware_of_betrayal(
+            "agent_corin",
+            "Corin",
+            "agent_mira",
+            "Mira",
+            "evt_00001",
+            Some("eastern_bridge".to_string()),
+        );
+
+        assert_eq!(situation.situation_type, "unaware_of_betrayal");
+        assert_eq!(situation.unaware_agent_id, "agent_corin");
+        assert_eq!(situation.unaware_agent_name, "Corin");
+        assert_eq!(situation.betrayer_id, Some("agent_mira".to_string()));
+        assert_eq!(situation.betrayer_name, Some("Mira".to_string()));
+        assert_eq!(situation.betrayal_event_id, Some("evt_00001".to_string()));
     }
 }
