@@ -3,6 +3,10 @@ name = "viz"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "viz"
+path = "src/main.rs"
+
 [dependencies]
 sim-events = { workspace = true }
 director = { workspace = true }
@@ -11,3 +15,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 notify = "6.0"  # File watching
 tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.10"
