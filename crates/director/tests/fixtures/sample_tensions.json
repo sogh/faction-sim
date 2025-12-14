@@ -1,0 +1,124 @@
+[
+  {
+    "tension_id": "tens_00001",
+    "detected_at_tick": 82000,
+    "last_updated_tick": 84729,
+    "status": "critical",
+    "tension_type": "brewing_betrayal",
+    "severity": 0.85,
+    "confidence": 0.75,
+    "summary": "Mira's trust in faction leader Corin has eroded significantly after broken promises. Secret meetings with Ironmere spymaster detected.",
+    "key_agents": [
+      {
+        "agent_id": "agent_mira_0042",
+        "role_in_tension": "potential_betrayer",
+        "trajectory": "toward_defection"
+      },
+      {
+        "agent_id": "agent_corin_0003",
+        "role_in_tension": "unaware_target",
+        "trajectory": "stable"
+      },
+      {
+        "agent_id": "agent_voss_0017",
+        "role_in_tension": "external_manipulator",
+        "trajectory": "advancing_goals"
+      }
+    ],
+    "key_locations": ["eastern_bridge", "neutral_market"],
+    "trigger_events": ["evt_00039102", "evt_00000007"],
+    "predicted_outcomes": [
+      {
+        "outcome": "mira_defects_to_ironmere",
+        "probability": 0.45,
+        "impact": "high",
+        "estimated_ticks_until": 2000
+      },
+      {
+        "outcome": "mira_discovered_before_defection",
+        "probability": 0.25,
+        "impact": "critical"
+      },
+      {
+        "outcome": "corin_reconciles_with_mira",
+        "probability": 0.15,
+        "impact": "medium"
+      },
+      {
+        "outcome": "mira_becomes_double_agent",
+        "probability": 0.15,
+        "impact": "high"
+      }
+    ],
+    "narrative_hooks": [
+      "Mira was once Corin's most trusted scout",
+      "The broken promise involved Mira's family land",
+      "Voss has been patient, building trust over months"
+    ],
+    "recommended_camera_focus": {
+      "primary": "agent_mira_0042",
+      "secondary": ["agent_voss_0017", "agent_corin_0003"],
+      "locations_of_interest": ["eastern_bridge"]
+    },
+    "connected_tensions": []
+  },
+  {
+    "tension_id": "tens_00002",
+    "detected_at_tick": 88000,
+    "last_updated_tick": 90000,
+    "status": "escalating",
+    "tension_type": "resource_conflict",
+    "severity": 0.55,
+    "confidence": 0.8,
+    "summary": "Winter grain shortages causing tension between factions. Both Thornwood and Ironmere competing for limited neutral territory resources.",
+    "key_agents": [
+      {
+        "agent_id": "agent_corin_0003",
+        "role_in_tension": "faction_leader",
+        "trajectory": "resource_pressure"
+      },
+      {
+        "agent_id": "agent_drake_0050",
+        "role_in_tension": "faction_leader",
+        "trajectory": "aggressive_acquisition"
+      },
+      {
+        "agent_id": "agent_lira_0028",
+        "role_in_tension": "trade_negotiator",
+        "trajectory": "seeking_compromise"
+      }
+    ],
+    "key_locations": ["neutral_market", "northern_farmlands"],
+    "trigger_events": ["evt_00000006"],
+    "predicted_outcomes": [
+      {
+        "outcome": "trade_agreement_renewed",
+        "probability": 0.4,
+        "impact": "low"
+      },
+      {
+        "outcome": "minor_skirmishes",
+        "probability": 0.35,
+        "impact": "medium",
+        "estimated_ticks_until": 5000
+      },
+      {
+        "outcome": "open_conflict",
+        "probability": 0.25,
+        "impact": "critical",
+        "estimated_ticks_until": 10000
+      }
+    ],
+    "narrative_hooks": [
+      "The worst winter in a decade",
+      "Old trade agreements expire at season's end",
+      "Both factions remember the Salt War"
+    ],
+    "recommended_camera_focus": {
+      "primary": "agent_lira_0028",
+      "secondary": ["agent_corin_0003", "agent_drake_0050"],
+      "locations_of_interest": ["neutral_market", "northern_farmlands"]
+    },
+    "connected_tensions": ["tens_00001"]
+  }
+]

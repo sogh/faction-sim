@@ -1,0 +1,343 @@
+{
+  "snapshot_id": "snap_000042",
+  "timestamp": {
+    "tick": 91000,
+    "date": "year_3.winter.day_28"
+  },
+  "triggered_by": "significant_event",
+  "world": {
+    "season": "winter",
+    "global_resources": {
+      "total_grain": 850,
+      "total_iron": 320,
+      "total_salt": 180,
+      "total_beer": 95
+    },
+    "active_threats": ["winter_food_shortage", "brewing_inter_faction_conflict"]
+  },
+  "factions": [
+    {
+      "faction_id": "thornwood",
+      "name": "The Thornwood Council",
+      "territory": ["thornwood_village", "thornwood_archive", "eastern_woods"],
+      "headquarters": "thornwood_village",
+      "resources": {
+        "grain": 350,
+        "iron": 80,
+        "salt": 60,
+        "beer": 45
+      },
+      "member_count": 3,
+      "leader": "agent_corin_0003",
+      "reader": "agent_sage_0099",
+      "archive_entry_count": 127,
+      "cohesion_score": 0.65,
+      "external_reputation": {
+        "ironmere": 0.35
+      }
+    },
+    {
+      "faction_id": "ironmere",
+      "name": "The Ironmere Compact",
+      "territory": ["ironmere_fortress", "northern_pass", "iron_mines"],
+      "headquarters": "ironmere_fortress",
+      "resources": {
+        "grain": 500,
+        "iron": 240,
+        "salt": 120,
+        "beer": 50
+      },
+      "member_count": 3,
+      "leader": "agent_drake_0050",
+      "reader": "agent_chronicle_0088",
+      "archive_entry_count": 98,
+      "cohesion_score": 0.78,
+      "external_reputation": {
+        "thornwood": 0.4
+      }
+    }
+  ],
+  "agents": [
+    {
+      "agent_id": "agent_corin_0003",
+      "name": "Corin Thornwood",
+      "alive": true,
+      "faction": "thornwood",
+      "role": "faction_leader",
+      "location": "thornwood_village",
+      "traits": {
+        "boldness": 0.6,
+        "loyalty_weight": 0.8,
+        "grudge_persistence": 0.4,
+        "ambition": 0.7,
+        "honesty": 0.6,
+        "sociability": 0.5,
+        "group_preference": 0.7
+      },
+      "status": {
+        "level": 5,
+        "role_title": "Council Leader",
+        "influence_score": 0.85,
+        "social_reach": 15,
+        "trusted_by_count": 12,
+        "trusts_count": 8
+      },
+      "needs": {
+        "food_security": "concerned",
+        "social_belonging": "satisfied"
+      },
+      "goals": [
+        {"goal": "maintain_faction_cohesion", "priority": 0.9},
+        {"goal": "secure_winter_supplies", "priority": 0.8, "target": "grain"}
+      ]
+    },
+    {
+      "agent_id": "agent_mira_0042",
+      "name": "Mira of Thornwood",
+      "alive": true,
+      "faction": "thornwood",
+      "role": "scout",
+      "location": "eastern_bridge",
+      "traits": {
+        "boldness": 0.7,
+        "loyalty_weight": 0.4,
+        "grudge_persistence": 0.8,
+        "ambition": 0.6,
+        "honesty": 0.3,
+        "sociability": 0.5,
+        "group_preference": 0.4
+      },
+      "status": {
+        "level": 3,
+        "role_title": "Senior Scout",
+        "influence_score": 0.35,
+        "social_reach": 6,
+        "trusted_by_count": 4,
+        "trusts_count": 3
+      },
+      "needs": {
+        "food_security": "satisfied",
+        "social_belonging": "strained"
+      },
+      "goals": [
+        {"goal": "gain_personal_security", "priority": 0.9},
+        {"goal": "resolve_grievance", "priority": 0.7, "target": "agent_corin_0003"}
+      ]
+    },
+    {
+      "agent_id": "agent_sage_0099",
+      "name": "Sage Whisperwind",
+      "alive": true,
+      "faction": "thornwood",
+      "role": "reader",
+      "location": "thornwood_archive",
+      "traits": {
+        "boldness": 0.3,
+        "loyalty_weight": 0.9,
+        "grudge_persistence": 0.2,
+        "ambition": 0.4,
+        "honesty": 0.8,
+        "sociability": 0.4,
+        "group_preference": 0.8
+      },
+      "status": {
+        "level": 4,
+        "role_title": "Reader",
+        "influence_score": 0.55,
+        "social_reach": 10,
+        "trusted_by_count": 9,
+        "trusts_count": 7
+      },
+      "needs": {
+        "food_security": "satisfied",
+        "social_belonging": "satisfied"
+      },
+      "goals": [
+        {"goal": "preserve_faction_history", "priority": 0.95},
+        {"goal": "mentor_next_generation", "priority": 0.6}
+      ]
+    },
+    {
+      "agent_id": "agent_drake_0050",
+      "name": "Drake Ironfist",
+      "alive": true,
+      "faction": "ironmere",
+      "role": "faction_leader",
+      "location": "ironmere_fortress",
+      "traits": {
+        "boldness": 0.8,
+        "loyalty_weight": 0.7,
+        "grudge_persistence": 0.6,
+        "ambition": 0.85,
+        "honesty": 0.5,
+        "sociability": 0.6,
+        "group_preference": 0.6
+      },
+      "status": {
+        "level": 5,
+        "role_title": "Compact Leader",
+        "influence_score": 0.9,
+        "social_reach": 18,
+        "trusted_by_count": 14,
+        "trusts_count": 6
+      },
+      "needs": {
+        "food_security": "satisfied",
+        "social_belonging": "satisfied"
+      },
+      "goals": [
+        {"goal": "expand_territory", "priority": 0.8},
+        {"goal": "weaken_thornwood", "priority": 0.6}
+      ]
+    },
+    {
+      "agent_id": "agent_voss_0017",
+      "name": "Voss the Quiet",
+      "alive": true,
+      "faction": "ironmere",
+      "role": "spymaster",
+      "location": "neutral_market",
+      "traits": {
+        "boldness": 0.5,
+        "loyalty_weight": 0.6,
+        "grudge_persistence": 0.7,
+        "ambition": 0.75,
+        "honesty": 0.2,
+        "sociability": 0.7,
+        "group_preference": 0.5
+      },
+      "status": {
+        "level": 4,
+        "role_title": "Spymaster",
+        "influence_score": 0.6,
+        "social_reach": 12,
+        "trusted_by_count": 5,
+        "trusts_count": 10
+      },
+      "needs": {
+        "food_security": "satisfied",
+        "social_belonging": "satisfied"
+      },
+      "goals": [
+        {"goal": "recruit_thornwood_agents", "priority": 0.85, "target": "agent_mira_0042"},
+        {"goal": "gather_intelligence", "priority": 0.7}
+      ]
+    },
+    {
+      "agent_id": "agent_lira_0028",
+      "name": "Lira the Weaver",
+      "alive": true,
+      "faction": "thornwood",
+      "role": "trader",
+      "location": "neutral_market",
+      "traits": {
+        "boldness": 0.4,
+        "loyalty_weight": 0.6,
+        "grudge_persistence": 0.3,
+        "ambition": 0.5,
+        "honesty": 0.7,
+        "sociability": 0.9,
+        "group_preference": 0.5
+      },
+      "status": {
+        "level": 3,
+        "role_title": "Master Trader",
+        "influence_score": 0.4,
+        "social_reach": 20,
+        "trusted_by_count": 8,
+        "trusts_count": 12
+      },
+      "needs": {
+        "food_security": "satisfied",
+        "social_belonging": "satisfied"
+      },
+      "goals": [
+        {"goal": "maintain_trade_relationships", "priority": 0.8},
+        {"goal": "profit_from_shortage", "priority": 0.5}
+      ]
+    }
+  ],
+  "relationships": {
+    "agent_corin_0003": {
+      "agent_mira_0042": {"reliability": 0.7, "alignment": 0.5, "capability": 0.8, "last_interaction_tick": 85000, "memory_count": 24},
+      "agent_sage_0099": {"reliability": 0.9, "alignment": 0.85, "capability": 0.7, "last_interaction_tick": 91000, "memory_count": 45}
+    },
+    "agent_mira_0042": {
+      "agent_corin_0003": {"reliability": 0.25, "alignment": 0.3, "capability": 0.8, "last_interaction_tick": 81204, "memory_count": 24},
+      "agent_voss_0017": {"reliability": 0.5, "alignment": 0.55, "capability": 0.6, "last_interaction_tick": 84729, "memory_count": 8}
+    },
+    "agent_voss_0017": {
+      "agent_mira_0042": {"reliability": 0.6, "alignment": 0.5, "capability": 0.75, "last_interaction_tick": 84729, "memory_count": 8},
+      "agent_drake_0050": {"reliability": 0.8, "alignment": 0.75, "capability": 0.9, "last_interaction_tick": 90000, "memory_count": 52}
+    }
+  },
+  "locations": [
+    {
+      "location_id": "thornwood_village",
+      "name": "Thornwood Village",
+      "type": "village",
+      "controlling_faction": "thornwood",
+      "agents_present": ["agent_corin_0003"],
+      "resources": {},
+      "properties": ["faction_headquarters", "gathering_hall"]
+    },
+    {
+      "location_id": "thornwood_archive",
+      "name": "The Thornwood Archive",
+      "type": "archive",
+      "controlling_faction": "thornwood",
+      "agents_present": ["agent_sage_0099"],
+      "resources": {},
+      "properties": ["sacred_space", "ritual_site"]
+    },
+    {
+      "location_id": "eastern_bridge",
+      "name": "Eastern Bridge",
+      "type": "neutral_territory",
+      "controlling_faction": null,
+      "agents_present": ["agent_mira_0042"],
+      "resources": {},
+      "properties": ["trade_route", "hidden_meeting_spot"]
+    },
+    {
+      "location_id": "neutral_market",
+      "name": "The Crossroads Market",
+      "type": "market",
+      "controlling_faction": null,
+      "agents_present": ["agent_voss_0017", "agent_lira_0028"],
+      "resources": {"grain_production": 0},
+      "properties": ["trade_hub", "neutral_ground", "information_exchange"]
+    },
+    {
+      "location_id": "ironmere_fortress",
+      "name": "Ironmere Fortress",
+      "type": "fortress",
+      "controlling_faction": "ironmere",
+      "agents_present": ["agent_drake_0050"],
+      "resources": {},
+      "properties": ["faction_headquarters", "defensive_position"]
+    }
+  ],
+  "computed_metrics": {
+    "faction_power_balance": {
+      "thornwood": 0.42,
+      "ironmere": 0.58
+    },
+    "war_probability_30_days": {
+      "thornwood_vs_ironmere": 0.25
+    },
+    "agents_at_defection_risk": ["agent_mira_0042"],
+    "factions_at_collapse_risk": [],
+    "social_network": {
+      "hubs": [
+        {"agent_id": "agent_corin_0003", "faction": "thornwood", "influence_score": 0.85, "role": "faction_leader", "connections": 15},
+        {"agent_id": "agent_drake_0050", "faction": "ironmere", "influence_score": 0.9, "role": "faction_leader", "connections": 18}
+      ],
+      "bridges": [
+        {"agent_id": "agent_lira_0028", "connects": ["thornwood", "ironmere"], "bridge_strength": 0.6, "known_to_faction": true},
+        {"agent_id": "agent_voss_0017", "connects": ["thornwood", "ironmere"], "bridge_strength": 0.4, "known_to_faction": false}
+      ],
+      "isolates": []
+    }
+  }
+}

@@ -201,3 +201,41 @@ Implemented JSON output writing in `src/output.rs`:
 
 **Tests**: 128 total (12 new output I/O tests)
 
+### Prompt 10: Testing with Sample Data
+**Started**: 2025-12-14
+**Completed**: 2025-12-14
+
+Created comprehensive integration tests in `tests/integration_tests.rs`:
+- Test fixture loading from `tests/fixtures/`:
+  - `sample_events.jsonl` - 10 sample events (shared from sim-events)
+  - `sample_tensions.json` - 2 tensions (betrayal, resource conflict)
+  - `sample_state.json` - Complete world snapshot with agents, factions, relationships
+- 11 integration tests:
+  - `test_fixtures_load` - verify fixture files load correctly
+  - `test_full_director_pipeline` - process tick with all data, verify output
+  - `test_betrayal_gets_focus` - betrayal tensions get camera focus
+  - `test_thread_fatigue_switches_focus` - verify fatigue mechanism
+  - `test_irony_detection` - verify betrayal tracking and irony detection
+  - `test_template_filling` - verify templates fill without unfilled placeholders
+  - `test_output_writing` - verify JSON file writing
+  - `test_streaming_output` - verify JSONL streaming writer
+  - `test_highlights_for_high_drama` - verify high-drama events produce highlights
+  - `test_multi_tick_state` - verify state maintained across ticks
+  - `test_golden_output` - verify structural properties of output
+
+**Tests**: 139 total (128 unit + 11 integration)
+
+---
+
+## Phase 1 Complete
+
+Director AI Phase 1 (Template-Based Director) is now complete with:
+- Event scoring with configurable weights
+- Tension-based focus selection with fatigue
+- Narrative thread tracking
+- Template-based commentary generation
+- Dramatic irony detection
+- Camera instruction output
+- JSON/JSONL file writing
+- Comprehensive test coverage (139 tests)
+
