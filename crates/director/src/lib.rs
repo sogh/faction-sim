@@ -31,8 +31,8 @@ pub mod threads;
 // Re-export output types
 pub use output::{
     CameraEasing, CameraFocus, CameraInstruction, CameraMode, CameraWaypoint, CommentaryItem,
-    CommentaryType, DirectorOutput, HighlightMarker, HighlightType, PacingHint, ZoomLevel,
-    generate_commentary_id, generate_instruction_id,
+    CommentaryType, DirectorOutput, HighlightMarker, HighlightType, OutputError, OutputReader,
+    OutputWriter, PacingHint, ZoomLevel, generate_commentary_id, generate_instruction_id,
 };
 
 // Re-export thread types

@@ -168,3 +168,36 @@ Implemented the main `Director` struct in `src/lib.rs`:
 
 **Tests**: 116 total (14 new Director integration tests)
 
+### Prompt 9: JSON Output
+**Started**: 2025-12-14
+**Completed**: 2025-12-14
+
+Implemented JSON output writing in `src/output.rs`:
+- Added file writing methods to `DirectorOutput`:
+  - `write_camera_script(&self, path: &Path)` - writes camera script as pretty JSON
+  - `write_commentary(&self, path: &Path)` - writes commentary queue as pretty JSON
+  - `write_highlights(&self, path: &Path)` - writes highlights as pretty JSON
+  - `write_all(&self, output_dir: &Path)` - writes all files to a directory
+  - `to_json()` / `to_json_compact()` - serialization helpers
+- `OutputError` enum with Io and Json variants
+- `OutputWriter` struct for streaming output:
+  - `new(output_dir: &Path)` - creates writer, opens JSONL files
+  - `write_tick(&mut self, output: &DirectorOutput)` - appends tick output
+  - `flush(&mut self)` - flushes buffered writers
+  - `write_summary(total_events, total_tensions)` - writes summary metadata
+  - Outputs to `.jsonl` format for real-time tailing by visualization
+- `OutputReader` struct for reading JSONL files:
+  - `from_dir(output_dir: &Path)` - opens full_output.jsonl
+  - `read_all()` - reads all outputs from file
+  - `read_tick(index)` - reads specific tick's output
+- 12 new unit tests:
+  - JSON serialization (pretty and compact)
+  - Individual file writing (camera, commentary, highlights)
+  - write_all creates all files
+  - OutputWriter creation and tick writing
+  - Summary generation
+  - OutputReader read_all and read_tick
+  - Error type display
+
+**Tests**: 128 total (12 new output I/O tests)
+
