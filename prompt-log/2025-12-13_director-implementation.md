@@ -114,3 +114,57 @@ Extended `src/commentary.rs` with dramatic irony detection:
 
 **Tests**: 102 total (12 new irony detection tests)
 
+### Prompt 8: Main Director Struct
+**Started**: 2025-12-14
+**Completed**: 2025-12-14
+
+Implemented the main `Director` struct in `src/lib.rs`:
+- `Director` struct fields:
+  - `config`: DirectorConfig
+  - `scorer`: EventScorer
+  - `focus_selector`: FocusSelector
+  - `thread_tracker`: ThreadTracker
+  - `commentary_generator`: CommentaryGenerator
+  - `irony_detector`: IronyDetector
+  - `current_tick`: u64
+  - `notability_threshold`: f32
+  - `tracked_agents`: HashSet<String>
+  - `current_focus`: Option<CameraFocus>
+- Constructor methods:
+  - `new(config)` - creates Director from config
+  - `from_config_file(path)` - loads config from TOML file
+  - `with_defaults()` - creates with default configuration
+- `process_tick()` main loop implementing full pipeline:
+  1. Build context from current thread state
+  2. Score all events using EventScorer
+  3. Filter to notable events (score >= threshold)
+  4. Update thread tracker with notable events and tensions
+  5. Process events for irony detection
+  6. Select camera focus using FocusSelector
+  7. Generate commentary (captions, irony, teasers)
+  8. Mark highlights for high-scoring events
+  9. Return DirectorOutput
+- Helper methods:
+  - `build_context()` - builds DirectorContext from tensions/tracked agents
+  - `mark_highlights()` - creates HighlightMarker for high-scoring events
+  - `update_tracked_agents()` - updates tracked agents from camera focus
+  - `cleanup()` - cleans up old betrayals
+  - Accessor methods: `config()`, `current_tick()`, `active_thread_count()`, `tracked_betrayal_count()`
+- `DirectorError` enum with Config, Template, Scorer variants
+- 14 new integration tests:
+  - Director creation and configuration
+  - Empty tick processing
+  - Notable event processing with commentary
+  - Low-drama event filtering
+  - Tension-based focus selection
+  - Thread creation from tensions
+  - Betrayal tracking
+  - Dramatic irony detection
+  - Multi-tick processing
+  - Cleanup of old betrayals
+  - Commentary queue limiting
+  - Highlight marking for high-drama events
+  - Context building with tensions
+
+**Tests**: 116 total (14 new Director integration tests)
+
