@@ -1,0 +1,13 @@
+[package]
+name = "viz"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sim-events = { workspace = true }
+director = { workspace = true }
+bevy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+notify = "6.0"  # File watching
+tracing = { workspace = true }

@@ -1,14 +1,32 @@
-[package]
-name = "emergent_sim"
+[workspace]
+resolver = "2"
+members = [
+    "crates/sim-core",
+    "crates/sim-events",
+    "crates/director",
+    "crates/viz",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-description = "An emergent medieval simulation engine"
+license = "MIT"
+repository = "https://github.com/yourusername/emergent-sim"
 
-[dependencies]
-bevy_ecs = "0.15"
+[workspace.dependencies]
+# Shared dependencies - crates reference these with { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rand = { version = "0.8", features = ["small_rng"] }
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.4", features = ["derive"] }
-toml = "0.9.8"
+thiserror = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+rand = "0.8"
+
+# Bevy for visualization
+bevy = "0.14"
+
+# Internal crates
+sim-events = { path = "crates/sim-events" }
+sim-core = { path = "crates/sim-core" }
+director = { path = "crates/director" }

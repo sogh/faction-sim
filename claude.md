@@ -1,207 +1,132 @@
-# Emergent Simulation Engine
+# Emergent Medieval Simulation
 
-## Project Overview
+## Project Vision
 
-A terrarium-style medieval simulation where hundreds of agents with simple behavioral rules produce emergent, dramatically compelling narratives. The simulation runs headlessly and produces structured output for a separate Director AI and visualization layer.
+A terrarium-style simulation where hundreds of agents with simple behavioral rules produce unpredictable, dramatically compelling emergent narratives. The system generates history organically, which can be observed in real-time or summarized into dramatic retellings.
 
-## Core Documents
+The core tension: mathematically emergent systems often feel alien, while human-feeling simulations typically require complex rule sets. We aim for the sweet spot—simple rules that produce genuinely human drama.
 
-Read these before making significant changes:
+## Architecture
 
-- `docs/emergent_sim_design.md` — High-level vision and design principles
-- `docs/simulation_output_schemas.md` — JSON schemas for all simulation output
-- `docs/agent_behavioral_rules.md` — Agent decision-making rules and weighting system
+Monorepo with Cargo workspace. Four main crates:
 
-## Technical Stack
+| Crate | Purpose |
+|-------|---------|
+| `sim-events` | Shared event types, timestamps, serialization (dependency for all others) |
+| `sim-core` | Agent logic, trust model, memory system, factions, world simulation |
+| `director` | Watches events, detects drama, outputs camera instructions |
+| `viz` | Bevy-based renderer, consumes director output, user interaction |
 
-- **Language**: Rust
-- **ECS Framework**: Bevy ECS (using Bevy's ECS without the rendering/game loop)
-- **Serialization**: serde + serde_json
-- **Event Storage**: Append-only JSONL files
-- **Random**: rand crate with seedable RNG for reproducibility
-
-## Architecture Principles
-
-### Event Sourcing
-Every significant action produces an immutable event. The simulation state at any tick can be reconstructed from the event stream. Events are self-contained — they include actor state at the moment of the event, not just IDs.
-
-### ECS Structure
-- **Entities**: Agents, Locations, Factions, Archive Entries
-- **Components**: Traits, Needs, Goals, Relationships, Memories, Position, FactionMembership, Status
-- **Systems**: Perception, NeedUpdate, ActionGeneration, ActionSelection, ActionExecution, EventLogging, TensionDetection
-
-### Determinism
-Given the same seed and initial conditions, the simulation should produce identical results. All randomness flows through a single seeded RNG. This enables replay, debugging, and branching.
-
-## Directory Structure
+## Data Flow
 
 ```
-src/
-├── main.rs              # Entry point, simulation loop
-├── lib.rs               # Public API for the simulation
-├── components/          # ECS components
-│   ├── mod.rs
-│   ├── agent.rs         # Traits, Needs, Goals
-│   ├── social.rs        # Relationships, Memories, Trust
-│   ├── faction.rs       # FactionMembership, Archive, Status
-│   └── world.rs         # Location, Resources, Season
-├── systems/             # ECS systems
-│   ├── mod.rs
-│   ├── perception.rs    # Update agent awareness
-│   ├── needs.rs         # Update food_security, belonging
-│   ├── action/          # Action generation and execution
-│   │   ├── mod.rs
-│   │   ├── generate.rs  # List valid actions
-│   │   ├── weight.rs    # Score actions
-│   │   ├── select.rs    # Probabilistic selection
-│   │   └── execute.rs   # Perform action, produce event
-│   ├── memory.rs        # Memory decay, propagation effects
-│   ├── tension.rs       # Detect and update tensions
-│   └── snapshot.rs      # Periodic state capture
-├── events/              # Event types and logging
-│   ├── mod.rs
-│   ├── types.rs         # All event type definitions
-│   └── logger.rs        # JSONL append-only writer
-├── actions/             # Action definitions
-│   ├── mod.rs
-│   ├── movement.rs
-│   ├── communication.rs
-│   ├── social.rs
-│   ├── resource.rs
-│   ├── archive.rs
-│   ├── faction.rs
-│   └── conflict.rs
-├── output/              # Output generation
-│   ├── mod.rs
-│   ├── schemas.rs       # Serialization structs matching output schemas
-│   ├── snapshot.rs      # World snapshot generation
-│   └── tension.rs       # Tension stream generation
-└── setup/               # World initialization
-    ├── mod.rs
-    ├── world.rs         # Create locations, resources
-    ├── factions.rs      # Create factions, assign territories
-    └── agents.rs        # Spawn agents with traits
+┌─────────────┐     events.jsonl      ┌──────────┐    camera_script.json    ┌─────┐
+│  sim-core   │ ───────────────────▶  │ director │ ──────────────────────▶  │ viz │
+└─────────────┘                       └──────────┘                          └─────┘
+       │                                    │
+       │ snapshots/                         │ tensions.json
+       ▼                                    ▼
+   [analysis]                          [analysis]
 ```
 
-## Key Implementation Notes
+## Key Design Principles
 
-### Trust is Multi-Dimensional
-Never store trust as a single value. Always track:
-- `reliability`: Do they do what they say?
-- `alignment`: Do they want what I want?
-- `capability`: Can they deliver?
+1. **Event Sourcing**: All state changes are immutable events. State at any moment is rebuildable from the event stream.
 
-### Memories Have Attribution
-When Agent A tells Agent B about Agent C, B's memory stores:
-- The content
-- The source chain (who told whom)
-- The fidelity (degrades with each hop)
+2. **Simulation Ahead of Camera**: Sim runs faster than visualization. Director has foresight to create dramatic irony.
 
-### Actions are Weighted Probabilistically
-Agents don't pick the "best" action. They pick probabilistically from weighted options. This prevents deterministic behavior while still respecting personality.
+3. **Separation of Concerns**:
+   - Simulation decides *what happens*
+   - Director decides *what matters*
+   - Visualization decides *how it looks*
 
-```rust
-// Pseudocode for action selection
-let weights: Vec<(Action, f32)> = generate_weighted_actions(agent, world);
-let selected = weighted_random_choice(&mut rng, &weights);
-```
+4. **Emergence Through Constraint**: Drama comes from incompatibilities—exclusive faction membership, scarce resources, conflicting loyalties.
 
-### Events are Self-Contained
-Each event includes enough context to understand it without loading other state:
-```rust
-// Good: includes actor state
-actors: {
-    primary: { agent_id, name, faction, role, location }
-}
+## Design Documents
 
-// Bad: just IDs requiring lookup
-actors: {
-    primary: "agent_mira_0042"
-}
-```
+Detailed specifications live in `docs/design/`:
+- `emergent_sim_design.md` — Core simulation concepts and agent behavior
+- `simulation_output_schemas.md` — JSON schemas for events, snapshots, tensions
+- `director_ai_design.md` — Drama detection and camera control
+- `visualization_design.md` — Rendering, sprites, UI
 
-### Needs are Abstracted
-Don't model calorie counts. Model security states:
-```rust
-enum FoodSecurity { Secure, Stressed, Desperate }
-enum SocialBelonging { Integrated, Peripheral, Isolated }
-```
+**Read the relevant design doc before implementing a feature.**
 
-## Coding Style
+## Current Phase
 
-- Prefer clarity over cleverness
-- Use descriptive names even if long: `calculate_betrayal_weight` not `calc_btrl_wt`
-- Comment the *why*, not the *what*
-- Each system should do one thing
-- Keep action execution logic separate from action weighting logic
+<!-- Update this as you progress -->
+**Status**: Project scaffolding
+**Next**: Implement sim-events types based on output schemas
 
-## Testing Strategy
+### Milestone Tracker
+- [ ] sim-events: Core types (Event, Timestamp, Tension, Snapshot)
+- [ ] sim-core Phase 1: Agent behavior loop with minimal rules
+- [ ] sim-core Phase 2: Trust and memory systems
+- [ ] sim-core Phase 3: Factions and archive system
+- [ ] director Phase 1: Template-based (scoring, focus, commentary)
+- [ ] director Phase 2: Pattern detection
+- [ ] director Phase 3: LLM integration
+- [ ] viz Phase 1: Core rendering
+- [ ] viz Phase 2: Director integration
+- [ ] viz Phase 3: Sprite system
 
-- Unit test individual weight calculations
-- Integration test action sequences (setup → action → verify event)
-- Property test that events are self-contained (parse event without world state)
-- Snapshot test output format stability
-- Determinism test: same seed = same output
+## Code Conventions
 
-## Output Files
+- Rust 2021 edition
+- Use `thiserror` for error types
+- Use `tracing` for logging (not `println!`)
+- Prefer composition over deep trait hierarchies
+- Events are the source of truth—state is derived
+- All public types need doc comments
+- Use `cargo fmt` and `cargo clippy` before committing
 
-The simulation produces:
-- `output/events.jsonl` — Append-only event log
-- `output/snapshots/snap_{tick}.json` — Periodic full state
-- `output/tensions.json` — Current tension state (overwritten)
-- `output/current_state.json` — Latest world state (overwritten each tick)
-
-## Running the Simulation
+## Common Commands
 
 ```bash
-# Run with default settings
-cargo run
+# Build everything
+cargo build --workspace
 
-# Run with specific seed for reproducibility
-cargo run -- --seed 12345
+# Run tests
+cargo test --workspace
 
-# Run for specific number of ticks
-cargo run -- --ticks 10000
+# Check a specific crate
+cargo check -p sim-core
 
-# Run with snapshot interval
-cargo run -- --snapshot-interval 1000
+# Run the simulation (once implemented)
+cargo run -p sim-core --bin simulate
+
+# Run visualization (once implemented)
+cargo run -p viz
+
+# Format and lint
+cargo fmt --all
+cargo clippy --workspace
 ```
 
-## Intervention System
+## File Naming Conventions
 
-The simulation supports pausing and injecting changes via JSON files in `interventions/`:
-- Modifications are applied at the start of the next tick
-- Interventions are logged as special events
-- Format matches the component schemas
+- Rust modules: `snake_case.rs`
+- Design docs: `snake_case.md`
+- Config files: `snake_case.toml`
+- JSON output: `snake_case.json` or `snake_case.jsonl`
 
-## Common Tasks
+## When Starting Work
 
-### Adding a New Action
-1. Define action struct in `actions/{category}.rs`
-2. Add precondition check in `systems/action/generate.rs`
-3. Add weight calculation in `systems/action/weight.rs`
-4. Add execution logic in `systems/action/execute.rs`
-5. Add event type in `events/types.rs`
-
-### Adding a New Trait
-1. Add field to `components/agent.rs`
-2. Update agent spawning in `setup/agents.rs`
-3. Add weight modifiers in relevant `systems/action/weight.rs` rules
-4. Update snapshot schema in `output/schemas.rs`
-
-### Adding a New Tension Type
-1. Add variant to tension enum in `output/tension.rs`
-2. Add detection logic in `systems/tension.rs`
-3. Document in `docs/simulation_output_schemas.md`
-
-## Performance Targets
-
-- Hundreds of agents (200-500) simulating concurrently
-- 1000+ ticks per second when not writing snapshots
-- Event log can grow unbounded; snapshots ~1-5MB each
+1. Check this CLAUDE.md for current phase
+2. Read the crate-specific CLAUDE.md for the area you're working on
+3. Reference design docs in `docs/design/` for specifications
+4. Update milestone tracker when completing features
 
 ## Prompt Log Rule
 
 - Manage the folder prompt-log.
 - BEFORE BEGINNING WORK:  If you aren't currently working in a prompt log, start a new markdown file there that contains the conversation topic and date time as a file name. In the file you will record the date, time, hostname, your name, and the verbatim user prompt.
 - After completing work, you will summarize the work and append it to the same file. We can use the same file for an entire session, but new sessions will generally need new files. This will be a useful context storage for historical purposes.
+
+## Gotchas and Notes
+
+<!-- Add things you discover here -->
+- Bevy 0.14 has breaking changes from 0.13—check migration guide if using old examples
+- JSON Lines (`.jsonl`) for events: one JSON object per line, no array wrapper
+- Agent IDs are prefixed with `agent_` for grep-ability
+- Event IDs are prefixed with `evt_`, tensions with `tens_`, snapshots with `snap_`

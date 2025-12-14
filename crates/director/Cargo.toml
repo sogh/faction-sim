@@ -1,0 +1,16 @@
+[package]
+name = "director"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sim-events = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }
+toml = "0.8"
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
