@@ -101,8 +101,55 @@ faction-sim/
 └── tools/
 ```
 
-### Notes
+---
 
-- The existing `src/` directory with the original simulation code still exists
-- The new monorepo workspace compiles successfully
-- Next steps: migrate existing code from `src/` into the appropriate crates
+## Second Session: Code Migration
+
+**User Prompt**: `remove that .tar.gz and start migrating the src/ files into the appropriate crates and make sure to build to make sure it still works when done`
+
+### Migration Completed
+
+1. **Removed** `project_scaffold.tar.gz`
+
+2. **Migrated sim-events crate**:
+   - Created `event.rs` with all event types (EventType, EventSubtype, Event, etc.)
+   - Created `timestamp.rs` with EventTimestamp and SnapshotTimestamp
+   - Created `tension.rs` with tension data types (TensionType, Tension, etc.)
+   - Created `snapshot.rs` with world snapshot types (WorldSnapshot, AgentSnapshot, etc.)
+   - Updated `lib.rs` with proper re-exports
+
+3. **Migrated sim-core crate**:
+   - Copied all source files from `src/` to `crates/sim-core/src/`
+   - Updated `main.rs` to use `sim_core` instead of `emergent_sim`
+   - Added required dependencies (bevy_ecs, clap, toml)
+   - Enabled `small_rng` feature for rand crate
+
+4. **Removed old src/ directory**
+
+5. **Verified full build**: `cargo build --workspace` succeeds
+
+6. **Verified simulation runs**: `cargo run -p sim-core -- --ticks 100` works
+
+### Final Working Structure
+
+```
+faction-sim/
+├── Cargo.toml (workspace)
+├── crates/
+│   ├── sim-events/     # Pure event/snapshot data types
+│   ├── sim-core/       # Full simulation (migrated from src/)
+│   ├── director/       # Stub - drama detection
+│   └── viz/            # Stub - visualization
+├── docs/design/        # Design documentation
+└── output/             # Simulation output
+```
+
+### Commands
+
+```bash
+# Build all crates
+cargo build --workspace
+
+# Run simulation
+cargo run -p sim-core -- --seed 42 --ticks 1000
+```

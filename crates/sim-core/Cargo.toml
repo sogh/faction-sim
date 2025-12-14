@@ -3,6 +3,10 @@ name = "sim-core"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "emergent_sim"
+path = "src/main.rs"
+
 [dependencies]
 sim-events = { workspace = true }
 serde = { workspace = true }
@@ -11,3 +15,15 @@ thiserror = { workspace = true }
 rand = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
+
+# Bevy ECS (without rendering)
+bevy_ecs = "0.14"
+
+# CLI argument parsing
+clap = { version = "4.0", features = ["derive"] }
+
+# Configuration parsing
+toml = "0.8"
+
+[dev-dependencies]
+# For determinism testing

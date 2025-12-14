@@ -11,11 +11,11 @@ use std::fs;
 use std::path::Path;
 
 // Use the library's modules instead of local duplicates to avoid type mismatches
-use emergent_sim::components;
-use emergent_sim::systems;
-use emergent_sim::events;
-use emergent_sim::output;
-use emergent_sim::setup;
+use sim_core::components;
+use sim_core::systems;
+use sim_core::events;
+use sim_core::output;
+use sim_core::setup;
 
 use systems::{
     AgentsByLocation, InteractionTracker, RitualAttendance, SeasonTracker, TrustEventQueue,
@@ -37,7 +37,7 @@ use systems::{
     execute_beer_actions,
 };
 
-use emergent_sim::interventions::{PendingInterventions, scan_interventions, apply_interventions};
+use sim_core::interventions::{PendingInterventions, scan_interventions, apply_interventions};
 
 pub use components::*;
 
@@ -76,7 +76,7 @@ pub struct SimulationState {
 }
 
 // Re-export SimRng from lib
-pub use emergent_sim::SimRng;
+pub use sim_core::SimRng;
 
 fn main() {
     let args = Args::parse();
