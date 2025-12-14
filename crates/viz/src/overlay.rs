@@ -1,12 +1,547 @@
 //! UI overlays: commentary display, status bar, playback controls.
 
 use bevy::prelude::*;
+use std::collections::VecDeque;
+
+use crate::camera::CameraController;
+use crate::director_state::DirectorState;
+use crate::state_loader::SimulationState;
 
 /// Plugin for UI overlay rendering.
 pub struct OverlayPlugin;
 
 impl Plugin for OverlayPlugin {
-    fn build(&self, _app: &mut App) {
-        // Will be implemented in Prompt 11 and 12
+    fn build(&self, app: &mut App) {
+        app.init_resource::<PlaybackState>()
+            .add_systems(Startup, setup_overlay_ui)
+            .add_systems(
+                Update,
+                (
+                    update_status_bar,
+                    update_commentary_display,
+                    fade_commentary,
+                    update_playback_controls,
+                    handle_playback_input,
+                ),
+            );
+    }
+}
+
+/// Resource tracking playback state.
+#[derive(Resource)]
+pub struct PlaybackState {
+    /// Whether playback is running.
+    pub playing: bool,
+    /// Playback speed multiplier.
+    pub speed: f32,
+}
+
+impl Default for PlaybackState {
+    fn default() -> Self {
+        Self {
+            playing: true,
+            speed: 1.0,
+        }
+    }
+}
+
+/// Component marking the root UI node.
+#[derive(Component)]
+pub struct OverlayRoot;
+
+/// Component marking the status bar.
+#[derive(Component)]
+pub struct StatusBar;
+
+/// Component marking the tick display text.
+#[derive(Component)]
+pub struct TickDisplay;
+
+/// Component marking the camera mode display.
+#[derive(Component)]
+pub struct CameraModeDisplay;
+
+/// Component marking the commentary container.
+#[derive(Component)]
+pub struct CommentaryContainer;
+
+/// Component for displayed commentary items.
+#[derive(Component)]
+pub struct DisplayedCommentary {
+    /// Unique ID of this commentary item.
+    pub item_id: String,
+    /// Remaining time to display (seconds).
+    pub time_remaining: f32,
+    /// Current opacity (for fade effects).
+    pub opacity: f32,
+}
+
+/// Component marking the playback controls container.
+#[derive(Component)]
+pub struct PlaybackControls;
+
+/// Component for play/pause button.
+#[derive(Component)]
+pub struct PlayPauseButton;
+
+/// Component for speed buttons.
+#[derive(Component)]
+pub struct SpeedButton(pub f32);
+
+/// System to set up the overlay UI structure.
+fn setup_overlay_ui(mut commands: Commands) {
+    // Root UI node covering the entire screen
+    commands
+        .spawn((
+            NodeBundle {
+                style: Style {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::SpaceBetween,
+                    ..default()
+                },
+                ..default()
+            },
+            OverlayRoot,
+        ))
+        .with_children(|parent| {
+            // Top bar (status info)
+            spawn_status_bar(parent);
+
+            // Middle spacer (allows clicks through to world)
+            parent.spawn(NodeBundle {
+                style: Style {
+                    flex_grow: 1.0,
+                    ..default()
+                },
+                ..default()
+            });
+
+            // Bottom area (commentary and controls)
+            spawn_bottom_area(parent);
+        });
+
+    tracing::info!("Overlay UI initialized");
+}
+
+/// Spawn the top status bar.
+fn spawn_status_bar(parent: &mut ChildBuilder) {
+    parent
+        .spawn((
+            NodeBundle {
+                style: Style {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(40.0),
+                    padding: UiRect::all(Val::Px(10.0)),
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                background_color: Color::srgba(0.0, 0.0, 0.0, 0.7).into(),
+                ..default()
+            },
+            StatusBar,
+        ))
+        .with_children(|parent| {
+            // Left side: Tick display
+            parent.spawn((
+                TextBundle::from_section(
+                    "Tick: 0 | Year 1, Spring, Day 1",
+                    TextStyle {
+                        font_size: 16.0,
+                        color: Color::WHITE,
+                        ..default()
+                    },
+                ),
+                TickDisplay,
+            ));
+
+            // Right side: Camera mode display
+            parent.spawn((
+                TextBundle::from_section(
+                    "Camera: Manual",
+                    TextStyle {
+                        font_size: 16.0,
+                        color: Color::srgb(0.7, 0.7, 0.7),
+                        ..default()
+                    },
+                ),
+                CameraModeDisplay,
+            ));
+        });
+}
+
+/// Spawn the bottom area with commentary and controls.
+fn spawn_bottom_area(parent: &mut ChildBuilder) {
+    parent
+        .spawn(NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|parent| {
+            // Commentary area
+            spawn_commentary_area(parent);
+
+            // Playback controls
+            spawn_playback_controls(parent);
+        });
+}
+
+/// Spawn the commentary display area.
+fn spawn_commentary_area(parent: &mut ChildBuilder) {
+    parent.spawn((
+        NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                min_height: Val::Px(60.0),
+                padding: UiRect::all(Val::Px(15.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            background_color: Color::srgba(0.0, 0.0, 0.0, 0.6).into(),
+            ..default()
+        },
+        CommentaryContainer,
+    ));
+}
+
+/// Spawn the playback controls.
+fn spawn_playback_controls(parent: &mut ChildBuilder) {
+    parent
+        .spawn((
+            NodeBundle {
+                style: Style {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(50.0),
+                    padding: UiRect::all(Val::Px(10.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                },
+                background_color: Color::srgba(0.1, 0.1, 0.1, 0.8).into(),
+                ..default()
+            },
+            PlaybackControls,
+        ))
+        .with_children(|parent| {
+            // Play/Pause button
+            spawn_control_button(parent, "||", PlayPauseButton);
+
+            // Separator
+            parent.spawn(NodeBundle {
+                style: Style {
+                    width: Val::Px(1.0),
+                    height: Val::Px(20.0),
+                    ..default()
+                },
+                background_color: Color::srgb(0.3, 0.3, 0.3).into(),
+                ..default()
+            });
+
+            // Speed buttons
+            spawn_speed_button(parent, "0.5x", 0.5);
+            spawn_speed_button(parent, "1x", 1.0);
+            spawn_speed_button(parent, "2x", 2.0);
+
+            // Separator
+            parent.spawn(NodeBundle {
+                style: Style {
+                    width: Val::Px(1.0),
+                    height: Val::Px(20.0),
+                    ..default()
+                },
+                background_color: Color::srgb(0.3, 0.3, 0.3).into(),
+                ..default()
+            });
+
+            // Director mode indicator
+            parent.spawn(TextBundle::from_section(
+                "[D] Director",
+                TextStyle {
+                    font_size: 14.0,
+                    color: Color::srgb(0.6, 0.6, 0.6),
+                    ..default()
+                },
+            ));
+        });
+}
+
+/// Spawn a control button.
+fn spawn_control_button(parent: &mut ChildBuilder, label: &str, marker: impl Component) {
+    parent
+        .spawn((
+            ButtonBundle {
+                style: Style {
+                    width: Val::Px(40.0),
+                    height: Val::Px(30.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                background_color: Color::srgb(0.2, 0.2, 0.2).into(),
+                ..default()
+            },
+            marker,
+        ))
+        .with_children(|parent| {
+            parent.spawn(TextBundle::from_section(
+                label,
+                TextStyle {
+                    font_size: 14.0,
+                    color: Color::WHITE,
+                    ..default()
+                },
+            ));
+        });
+}
+
+/// Spawn a speed button.
+fn spawn_speed_button(parent: &mut ChildBuilder, label: &str, speed: f32) {
+    parent
+        .spawn((
+            ButtonBundle {
+                style: Style {
+                    width: Val::Px(50.0),
+                    height: Val::Px(30.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                background_color: Color::srgb(0.2, 0.2, 0.2).into(),
+                ..default()
+            },
+            SpeedButton(speed),
+        ))
+        .with_children(|parent| {
+            parent.spawn(TextBundle::from_section(
+                label,
+                TextStyle {
+                    font_size: 14.0,
+                    color: Color::WHITE,
+                    ..default()
+                },
+            ));
+        });
+}
+
+/// System to update the status bar.
+fn update_status_bar(
+    state: Res<SimulationState>,
+    camera: Res<CameraController>,
+    director: Res<DirectorState>,
+    mut tick_query: Query<&mut Text, (With<TickDisplay>, Without<CameraModeDisplay>)>,
+    mut mode_query: Query<&mut Text, (With<CameraModeDisplay>, Without<TickDisplay>)>,
+) {
+    // Update tick display
+    for mut text in tick_query.iter_mut() {
+        if let Some(ref snapshot) = state.snapshot {
+            text.sections[0].value = format!(
+                "Tick: {} | Year {}, {}, Day {}",
+                snapshot.timestamp.tick,
+                snapshot.timestamp.date.year,
+                snapshot.timestamp.date.season,
+                snapshot.timestamp.date.day,
+            );
+        } else {
+            text.sections[0].value = "No simulation data".to_string();
+        }
+    }
+
+    // Update camera mode display
+    for mut text in mode_query.iter_mut() {
+        let mode_str = if director.enabled {
+            if camera.is_director() {
+                "Director"
+            } else {
+                "Manual (override)"
+            }
+        } else {
+            "Manual"
+        };
+        text.sections[0].value = format!("Camera: {}", mode_str);
+    }
+}
+
+/// System to update commentary display.
+fn update_commentary_display(
+    mut commands: Commands,
+    director: Res<DirectorState>,
+    container_query: Query<Entity, With<CommentaryContainer>>,
+    existing: Query<&DisplayedCommentary>,
+    mut displayed_ids: Local<VecDeque<String>>,
+) {
+    let Ok(container) = container_query.get_single() else {
+        return;
+    };
+
+    // Check for new commentary items
+    for item in &director.commentary_queue {
+        // Skip if already displayed
+        if existing.iter().any(|d| d.item_id == item.item_id) {
+            continue;
+        }
+
+        if displayed_ids.contains(&item.item_id) {
+            continue;
+        }
+
+        // Determine style based on commentary type
+        let (font_size, color, style_prefix) = match item.commentary_type {
+            director::CommentaryType::EventCaption => (18.0, Color::WHITE, ""),
+            director::CommentaryType::DramaticIrony => {
+                (16.0, Color::srgb(0.9, 0.8, 0.5), "// ")
+            }
+            director::CommentaryType::ContextReminder => {
+                (14.0, Color::srgb(0.7, 0.7, 0.7), "")
+            }
+            director::CommentaryType::TensionTeaser => {
+                (16.0, Color::srgb(0.8, 0.6, 0.6), "")
+            }
+            director::CommentaryType::NarratorVoice => (18.0, Color::srgb(1.0, 0.95, 0.8), ""),
+        };
+
+        // Spawn commentary text
+        let text_entity = commands
+            .spawn((
+                TextBundle::from_section(
+                    format!("{}{}", style_prefix, item.content),
+                    TextStyle {
+                        font_size,
+                        color,
+                        ..default()
+                    },
+                )
+                .with_style(Style {
+                    margin: UiRect::all(Val::Px(5.0)),
+                    ..default()
+                }),
+                DisplayedCommentary {
+                    item_id: item.item_id.clone(),
+                    time_remaining: item.display_duration_ticks as f32 / 60.0, // Convert ticks to seconds
+                    opacity: 1.0,
+                },
+            ))
+            .id();
+
+        commands.entity(container).add_child(text_entity);
+        displayed_ids.push_back(item.item_id.clone());
+
+        // Limit displayed items
+        if displayed_ids.len() > 3 {
+            displayed_ids.pop_front();
+        }
+    }
+}
+
+/// System to fade and remove old commentary.
+fn fade_commentary(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut commentary: Query<(Entity, &mut DisplayedCommentary, &mut Text)>,
+) {
+    let dt = time.delta_seconds();
+
+    for (entity, mut displayed, mut text) in commentary.iter_mut() {
+        displayed.time_remaining -= dt;
+
+        // Fade out during last second
+        if displayed.time_remaining < 1.0 && displayed.time_remaining > 0.0 {
+            displayed.opacity = displayed.time_remaining;
+            if let Some(section) = text.sections.first_mut() {
+                let base_color = section.style.color;
+                section.style.color = base_color.with_alpha(displayed.opacity);
+            }
+        }
+
+        // Remove when expired
+        if displayed.time_remaining <= 0.0 {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+}
+
+/// System to update playback control visuals.
+fn update_playback_controls(
+    playback: Res<PlaybackState>,
+    mut play_button_query: Query<&Children, With<PlayPauseButton>>,
+    mut play_button_text: Query<&mut Text>,
+    mut speed_buttons: Query<(&SpeedButton, &mut BackgroundColor)>,
+) {
+    // Update play/pause button text
+    for children in play_button_query.iter_mut() {
+        for &child in children.iter() {
+            if let Ok(mut text) = play_button_text.get_mut(child) {
+                text.sections[0].value = if playback.playing {
+                    "||".to_string()
+                } else {
+                    ">".to_string()
+                };
+            }
+        }
+    }
+
+    // Highlight active speed button
+    for (speed_button, mut bg_color) in speed_buttons.iter_mut() {
+        let is_active = (speed_button.0 - playback.speed).abs() < 0.01;
+        *bg_color = if is_active {
+            Color::srgb(0.3, 0.5, 0.3).into()
+        } else {
+            Color::srgb(0.2, 0.2, 0.2).into()
+        };
+    }
+}
+
+/// System to handle playback control input.
+fn handle_playback_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut playback: ResMut<PlaybackState>,
+    play_button_query: Query<&Interaction, (Changed<Interaction>, With<PlayPauseButton>)>,
+    speed_button_query: Query<(&Interaction, &SpeedButton), Changed<Interaction>>,
+) {
+    // Keyboard shortcuts
+    if keyboard.just_pressed(KeyCode::Space) {
+        playback.playing = !playback.playing;
+    }
+    if keyboard.just_pressed(KeyCode::Digit1) {
+        playback.speed = 0.5;
+    }
+    if keyboard.just_pressed(KeyCode::Digit2) {
+        playback.speed = 1.0;
+    }
+    if keyboard.just_pressed(KeyCode::Digit3) {
+        playback.speed = 2.0;
+    }
+
+    // Button clicks
+    for interaction in play_button_query.iter() {
+        if *interaction == Interaction::Pressed {
+            playback.playing = !playback.playing;
+        }
+    }
+
+    for (interaction, speed_button) in speed_button_query.iter() {
+        if *interaction == Interaction::Pressed {
+            playback.speed = speed_button.0;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_playback_state_default() {
+        let state = PlaybackState::default();
+        assert!(state.playing);
+        assert_eq!(state.speed, 1.0);
     }
 }

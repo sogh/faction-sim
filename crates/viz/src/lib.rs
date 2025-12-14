@@ -6,6 +6,8 @@
 
 pub mod agents;
 pub mod camera;
+pub mod debug;
+pub mod director_state;
 pub mod overlay;
 pub mod state_loader;
 pub mod world;

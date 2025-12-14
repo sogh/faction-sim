@@ -1,0 +1,39 @@
+[
+  {
+    "item_id": "com_91000_0001",
+    "timestamp": {
+      "tick": 91000,
+      "date": "year_3.winter.day_28"
+    },
+    "display_duration_ticks": 150,
+    "commentary_type": "event_caption",
+    "content": "Mira slips away from Thornwood territory under cover of winter fog.",
+    "priority": 0.7,
+    "related_agents": ["agent_mira_0042"]
+  },
+  {
+    "item_id": "com_91000_0002",
+    "timestamp": {
+      "tick": 91050,
+      "date": "year_3.winter.day_28"
+    },
+    "display_duration_ticks": 200,
+    "commentary_type": "dramatic_irony",
+    "content": "Corin still trusts Mira with the patrol schedules. He doesn't know about her meetings at the bridge.",
+    "priority": 0.85,
+    "related_agents": ["agent_corin_0003", "agent_mira_0042"],
+    "related_tension": "tens_00284"
+  },
+  {
+    "item_id": "com_91000_0003",
+    "timestamp": {
+      "tick": 91100,
+      "date": "year_3.winter.day_28"
+    },
+    "display_duration_ticks": 180,
+    "commentary_type": "tension_teaser",
+    "content": "Winter stores are running low. Desperate times breed desperate choices.",
+    "priority": 0.6,
+    "related_tension": "tens_00285"
+  }
+]

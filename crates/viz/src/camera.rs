@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 
+use crate::director_state::ManualOverride;
+
 /// Plugin for camera control and movement.
 pub struct CameraPlugin;
 
@@ -293,6 +295,7 @@ fn handle_camera_input(
     mut scroll: EventReader<bevy::input::mouse::MouseWheel>,
     windows: Query<&Window>,
     camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    mut manual_override: Option<ResMut<ManualOverride>>,
 ) {
     let Ok(window) = windows.get_single() else {
         return;
@@ -306,6 +309,9 @@ fn handle_camera_input(
         // Switch to manual mode if in director mode
         if controller.is_director() {
             controller.set_manual();
+            if let Some(ref mut override_state) = manual_override {
+                override_state.start();
+            }
         }
 
         let mut delta = Vec2::ZERO;
@@ -330,6 +336,9 @@ fn handle_camera_input(
         // Switch to manual mode if in director mode
         if controller.is_director() {
             controller.set_manual();
+            if let Some(ref mut override_state) = manual_override {
+                override_state.start();
+            }
         }
 
         let zoom_delta = ev.y * 0.1;
@@ -363,6 +372,7 @@ fn handle_keyboard_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut play_pause_events: EventWriter<PlayPauseEvent>,
+    mut manual_override: Option<ResMut<ManualOverride>>,
 ) {
     let delta = time.delta_seconds();
 
@@ -377,6 +387,9 @@ fn handle_keyboard_input(
 
     if has_camera_input && controller.is_director() {
         controller.set_manual();
+        if let Some(ref mut override_state) = manual_override {
+            override_state.start();
+        }
     }
 
     // Arrow key panning

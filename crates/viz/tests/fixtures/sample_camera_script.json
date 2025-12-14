@@ -1,0 +1,61 @@
+[
+  {
+    "instruction_id": "cam_91000_0001",
+    "timestamp": {
+      "tick": 91000,
+      "date": "year_3.winter.day_28"
+    },
+    "camera_mode": {
+      "type": "follow_agent",
+      "agent_id": "agent_mira_0042",
+      "zoom": "close"
+    },
+    "focus": {
+      "type": "primary",
+      "id": "agent_mira_0042"
+    },
+    "pacing": "normal",
+    "reason": "Following potential traitor",
+    "tension_id": "tens_00284"
+  },
+  {
+    "instruction_id": "cam_91000_0002",
+    "timestamp": {
+      "tick": 91100,
+      "date": "year_3.winter.day_28"
+    },
+    "valid_until": {
+      "tick": 91200,
+      "date": "year_3.winter.day_28"
+    },
+    "camera_mode": {
+      "type": "frame_multiple",
+      "agent_ids": ["agent_mira_0042", "agent_voss_0017"],
+      "auto_zoom": true
+    },
+    "focus": {
+      "type": "conversation",
+      "agent_a": "agent_mira_0042",
+      "agent_b": "agent_voss_0017"
+    },
+    "pacing": "climactic",
+    "reason": "Secret meeting between factions"
+  },
+  {
+    "instruction_id": "cam_91000_0003",
+    "timestamp": {
+      "tick": 91200,
+      "date": "year_3.winter.day_28"
+    },
+    "camera_mode": {
+      "type": "overview",
+      "region": null
+    },
+    "focus": {
+      "type": "location",
+      "location_id": "neutral_market"
+    },
+    "pacing": "slow",
+    "reason": "Establishing shot after meeting"
+  }
+]
