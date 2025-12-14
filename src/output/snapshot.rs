@@ -74,11 +74,13 @@ pub fn generate_snapshot(world: &mut World, triggered_by: &str) -> WorldSnapshot
     let mut global_grain = 0u32;
     let mut global_iron = 0u32;
     let mut global_salt = 0u32;
+    let mut global_beer = 0u32;
 
     for faction in faction_registry.all_factions() {
         global_grain += faction.resources.grain;
         global_iron += faction.resources.iron;
         global_salt += faction.resources.salt;
+        global_beer += faction.resources.beer;
 
         let archive = faction_registry.get_archive(&faction.id.0);
         let archive_count = archive.map(|a| a.entry_count()).unwrap_or(0);
@@ -92,6 +94,7 @@ pub fn generate_snapshot(world: &mut World, triggered_by: &str) -> WorldSnapshot
                 grain: faction.resources.grain,
                 iron: faction.resources.iron,
                 salt: faction.resources.salt,
+                beer: faction.resources.beer,
             },
             member_count: faction.member_count,
             leader: faction.leader.clone(),
@@ -106,6 +109,7 @@ pub fn generate_snapshot(world: &mut World, triggered_by: &str) -> WorldSnapshot
         total_grain: global_grain,
         total_iron: global_iron,
         total_salt: global_salt,
+        total_beer: global_beer,
     };
 
     // Collect agent data
@@ -383,6 +387,7 @@ mod tests {
                 grain: 100,
                 iron: 100,
                 salt: 100,
+                beer: 50,
             },
             member_count: 50,
             leader: None,

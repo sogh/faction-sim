@@ -12,7 +12,8 @@ use crate::actions::resource::{ResourceAction, ResourceActionType};
 use crate::actions::social::{SocialAction, SocialActionType, social_weights};
 use crate::actions::faction::{FactionAction, FactionActionType};
 use crate::actions::conflict::{ConflictAction, ConflictActionType, conflict_weights};
-use crate::components::agent::{AgentId, AgentName, Alive, Goals, GoalType, Needs, Role, SocialBelonging, Traits};
+use crate::actions::beer::{BeerAction, BeerActionType, beer_weights};
+use crate::components::agent::{AgentId, AgentName, Alive, Goals, GoalType, Intoxication, Needs, Role, SocialBelonging, Traits};
 use crate::components::social::{Memory, MemoryBank, MemorySource, MemoryValence, RelationshipGraph};
 use crate::components::world::{Position, WorldState};
 use crate::events::types::{
@@ -116,6 +117,9 @@ pub fn execute_movement_actions(
             }
             Action::Conflict(_) => {
                 // Conflict actions are handled by execute_conflict_actions
+            }
+            Action::Beer(_) => {
+                // Beer actions are handled by execute_beer_actions
             }
             Action::Idle => {
                 // No action needed for idle
@@ -800,9 +804,13 @@ pub fn execute_resource_actions(
     for (actor_id, action, actor_name, location, actor_faction) in resource_actions {
         match action.action_type {
             ResourceActionType::Work => {
-                // Add resources to faction
+                // Add resources to faction with seasonal modifier
+                // Spring: 0.8x, Summer: 1.2x, Autumn: 1.0x, Winter: 0.4x
+                let seasonal_modifier = world_state.current_season.production_modifier();
+                let actual_yield = (action.amount as f32 * seasonal_modifier).round() as u32;
+
                 if let Some(faction) = faction_registry.get_mut(&actor_faction) {
-                    faction.resources.grain += action.amount;
+                    faction.resources.grain += actual_yield;
                 }
 
                 let event = create_resource_event(
@@ -813,7 +821,7 @@ pub fn execute_resource_actions(
                     &actor_faction,
                     &location,
                     ResourceSubtype::Work,
-                    action.amount,
+                    actual_yield,
                     None,
                 );
                 tick_events.push(event);
@@ -1468,6 +1476,206 @@ fn create_conflict_event(
             state_changes: Vec::new(),
         }),
         drama_tags,
+        drama_score,
+        connected_events: Vec::new(),
+    }
+}
+
+/// System to execute beer actions (brew, drink, share)
+pub fn execute_beer_actions(
+    world_state: Res<WorldState>,
+    mut faction_registry: ResMut<FactionRegistry>,
+    mut relationship_graph: ResMut<RelationshipGraph>,
+    selected_actions: Res<SelectedActions>,
+    mut tick_events: ResMut<TickEvents>,
+    mut query: Query<(
+        &AgentId,
+        &AgentName,
+        &Position,
+        &FactionMembership,
+        &mut Intoxication,
+        &mut Needs,
+    )>,
+) {
+    // Collect beer actions to process
+    let mut beer_actions: Vec<(String, BeerAction, String, String, String)> = Vec::new();
+
+    for (agent_id, name, pos, membership, _, _) in query.iter() {
+        if let Some(action) = selected_actions.actions.get(&agent_id.0) {
+            if let Action::Beer(beer_action) = action {
+                beer_actions.push((
+                    agent_id.0.clone(),
+                    beer_action.clone(),
+                    name.0.clone(),
+                    pos.location_id.clone(),
+                    membership.faction_id.clone(),
+                ));
+            }
+        }
+    }
+
+    for (actor_id, action, actor_name, location, actor_faction) in beer_actions {
+        match action.action_type {
+            BeerActionType::Brew => {
+                if let Some(faction) = faction_registry.get_mut(&actor_faction) {
+                    let grain_cost = beer_weights::GRAIN_PER_BEER * action.amount;
+                    if faction.resources.grain >= grain_cost {
+                        faction.resources.grain -= grain_cost;
+                        faction.resources.beer += action.amount;
+
+                        // Generate brew event (using Resource type for now)
+                        let event = create_beer_event(
+                            &mut tick_events,
+                            &world_state,
+                            &actor_id,
+                            &actor_name,
+                            &actor_faction,
+                            &location,
+                            "brew",
+                            action.amount,
+                            None,
+                        );
+                        tick_events.push(event);
+                    }
+                }
+            }
+            BeerActionType::Drink => {
+                if let Some(faction) = faction_registry.get_mut(&actor_faction) {
+                    if faction.resources.beer > 0 {
+                        faction.resources.beer -= 1;
+
+                        // Apply intoxication to agent
+                        for (id, _, _, _, mut intox, mut needs) in query.iter_mut() {
+                            if id.0 == actor_id {
+                                intox.apply_drink(world_state.current_tick);
+
+                                // Boost social belonging slightly
+                                if needs.social_belonging == SocialBelonging::Isolated {
+                                    needs.social_belonging = SocialBelonging::Peripheral;
+                                }
+                                break;
+                            }
+                        }
+
+                        // Generate drink event
+                        let event = create_beer_event(
+                            &mut tick_events,
+                            &world_state,
+                            &actor_id,
+                            &actor_name,
+                            &actor_faction,
+                            &location,
+                            "drink",
+                            1,
+                            None,
+                        );
+                        tick_events.push(event);
+                    }
+                }
+            }
+            BeerActionType::Share => {
+                if let Some(target_id) = &action.target_id {
+                    if let Some(faction) = faction_registry.get_mut(&actor_faction) {
+                        if faction.resources.beer > 0 {
+                            faction.resources.beer -= 1;
+
+                            // Build trust between sharer and recipient
+                            let rel = relationship_graph.ensure_relationship(&actor_id, target_id);
+                            rel.trust.update_reliability(beer_weights::SHARE_TRUST_GAIN);
+                            rel.last_interaction_tick = world_state.current_tick;
+
+                            // Apply intoxication to target
+                            for (id, _, _, _, mut intox, _) in query.iter_mut() {
+                                if &id.0 == target_id {
+                                    intox.apply_drink(world_state.current_tick);
+                                    break;
+                                }
+                            }
+
+                            // Generate share event
+                            let event = create_beer_event(
+                                &mut tick_events,
+                                &world_state,
+                                &actor_id,
+                                &actor_name,
+                                &actor_faction,
+                                &location,
+                                "share",
+                                1,
+                                Some(target_id),
+                            );
+                            tick_events.push(event);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Create a beer-related event
+fn create_beer_event(
+    tick_events: &mut TickEvents,
+    world_state: &WorldState,
+    actor_id: &str,
+    actor_name: &str,
+    actor_faction: &str,
+    location: &str,
+    action_type: &str,
+    amount: u32,
+    target: Option<&str>,
+) -> Event {
+    let event_id = tick_events.generate_id();
+    let timestamp = EventTimestamp {
+        tick: world_state.current_tick,
+        date: world_state.formatted_date(),
+    };
+
+    let actor = ActorSnapshot {
+        agent_id: actor_id.to_string(),
+        name: actor_name.to_string(),
+        faction: actor_faction.to_string(),
+        role: "worker".to_string(),
+        location: location.to_string(),
+    };
+
+    let (trigger, drama_score, description) = match action_type {
+        "brew" => ("brewing_beer", 0.1, format!("brewed {} beer", amount)),
+        "drink" => ("drinking_beer", 0.15, "enjoyed some beer".to_string()),
+        "share" => (
+            "sharing_beer",
+            0.25,
+            format!("shared beer with {}", target.unwrap_or("someone")),
+        ),
+        _ => ("beer_action", 0.1, "beer activity".to_string()),
+    };
+
+    Event {
+        event_id,
+        timestamp,
+        event_type: EventType::Resource, // Using Resource type for beer events
+        subtype: EventSubtype::Resource(ResourceSubtype::Acquire), // Could add BeerSubtype later
+        actors: EventActors {
+            primary: actor,
+            secondary: target.map(|t| ActorSnapshot {
+                agent_id: t.to_string(),
+                name: t.to_string(),
+                faction: actor_faction.to_string(),
+                role: "worker".to_string(),
+                location: location.to_string(),
+            }),
+            affected: None,
+        },
+        context: EventContext {
+            trigger: trigger.to_string(),
+            preconditions: Vec::new(),
+            location_description: Some(format!("at {}", location)),
+        },
+        outcome: EventOutcome::General(GeneralOutcome {
+            description: Some(description),
+            state_changes: Vec::new(),
+        }),
+        drama_tags: vec!["social".to_string()],
         drama_score,
         connected_events: Vec::new(),
     }

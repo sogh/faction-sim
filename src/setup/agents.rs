@@ -7,7 +7,7 @@ use rand::rngs::SmallRng;
 use rand::Rng;
 
 use crate::components::agent::{
-    Agent, AgentId, AgentName, Alive, FoodSecurity, Goals, Needs, Role, SocialBelonging, Traits,
+    Agent, AgentId, AgentName, Alive, FoodSecurity, Goals, Intoxication, Needs, Role, SocialBelonging, Traits,
 };
 use crate::components::faction::FactionMembership;
 use crate::components::social::{Memory, MemoryBank, MemoryValence, Relationship, RelationshipGraph, Trust};
@@ -162,6 +162,7 @@ pub fn spawn_faction_agents(
             Position::new(hq_location),
             Alive::new(),
             VisibleAgents::new(),
+            Intoxication::new(),
         )).id();
 
         spawned_entities.push(entity);

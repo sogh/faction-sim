@@ -19,18 +19,22 @@ use emergent_sim::setup;
 
 use systems::{
     AgentsByLocation, InteractionTracker, RitualAttendance, SeasonTracker, TrustEventQueue,
+    ConsumptionTracker,
     build_location_index, update_perception,
     update_food_security, update_social_belonging, decay_interaction_counts,
     decay_memories, cleanup_memories,
+    apply_daily_consumption, enforce_storage_caps, apply_seasonal_spoilage, decay_intoxication,
     process_trust_events, decay_grudges,
     execute_rituals,
     detect_tensions, output_tensions,
     PendingActions, SelectedActions, TickEvents,
     generate_movement_actions, generate_patrol_actions, generate_communication_actions, generate_archive_actions,
     generate_resource_actions, generate_social_actions, generate_faction_actions, generate_conflict_actions,
+    generate_beer_actions,
     apply_trait_weights, add_noise_to_weights, select_actions,
     execute_movement_actions, execute_communication_actions, execute_archive_actions,
     execute_resource_actions, execute_social_actions, execute_faction_actions, execute_conflict_actions,
+    execute_beer_actions,
 };
 
 use emergent_sim::interventions::{PendingInterventions, scan_interventions, apply_interventions};
@@ -132,6 +136,7 @@ fn main() {
     world.insert_resource(InteractionTracker::new());
     world.insert_resource(RitualAttendance::new());
     world.insert_resource(SeasonTracker::new());
+    world.insert_resource(ConsumptionTracker::new());
 
     // Initialize action resources
     world.insert_resource(PendingActions::new());
@@ -197,12 +202,24 @@ fn main() {
         update_perception,
     ).chain().after(apply_interventions));
 
-    // Needs systems run after perception
+    // Consumption systems run after perception (daily eating, storage caps, spoilage)
+    schedule.add_systems((
+        apply_daily_consumption,
+        enforce_storage_caps,
+        apply_seasonal_spoilage,
+    ).after(update_perception));
+
+    // Needs systems run after consumption
     schedule.add_systems((
         update_food_security,
         update_social_belonging,
         decay_interaction_counts,
-    ).after(update_perception));
+    ).after(apply_daily_consumption));
+
+    // Intoxication decay runs with needs
+    schedule.add_systems(
+        decay_intoxication.after(update_food_security)
+    );
 
     // Memory systems run after needs (decay is per-season, cleanup is periodic)
     schedule.add_systems((
@@ -225,6 +242,7 @@ fn main() {
         generate_social_actions,
         generate_faction_actions,
         generate_conflict_actions,
+        generate_beer_actions,
     ).after(cleanup_memories));
 
     schedule.add_systems(
@@ -237,6 +255,7 @@ fn main() {
             .after(generate_social_actions)
             .after(generate_faction_actions)
             .after(generate_conflict_actions)
+            .after(generate_beer_actions)
     );
 
     schedule.add_systems(
@@ -256,6 +275,7 @@ fn main() {
         execute_social_actions,
         execute_faction_actions,
         execute_conflict_actions,
+        execute_beer_actions,
     ).after(select_actions));
 
     // Trust systems run after action execution
@@ -269,7 +289,8 @@ fn main() {
      .after(execute_resource_actions)
      .after(execute_social_actions)
      .after(execute_faction_actions)
-     .after(execute_conflict_actions));
+     .after(execute_conflict_actions)
+     .after(execute_beer_actions));
 
     // Ritual system runs after trust (rituals are periodic faction-wide events)
     schedule.add_systems(

@@ -136,6 +136,9 @@ fn food_role_modifier(role: &Role) -> f32 {
     }
 }
 
+/// Beer nutrition ratio for food security calculation
+const BEER_NUTRITION_RATIO: f32 = 0.5;
+
 /// System to update agent food security based on faction resources
 pub fn update_food_security(
     faction_registry: Res<FactionRegistry>,
@@ -149,12 +152,14 @@ pub fn update_food_security(
             continue;
         };
 
-        // Calculate grain per member
+        // Calculate effective food per member including beer (50% nutrition value)
         let member_count = faction.member_count.max(1);
-        let grain_per_member = faction.resources.grain as f32 / member_count as f32;
+        let effective_food = faction.resources.grain as f32
+            + (faction.resources.beer as f32 * BEER_NUTRITION_RATIO);
+        let food_per_member = effective_food / member_count as f32;
 
         // Apply role modifier
-        let effective_grain = grain_per_member * food_role_modifier(&membership.role);
+        let effective_grain = food_per_member * food_role_modifier(&membership.role);
 
         // State transitions with hysteresis to prevent rapid oscillation
         let new_state = match needs.food_security {

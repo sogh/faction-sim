@@ -11,6 +11,7 @@ use crate::actions::resource::{ResourceAction, ResourceActionType};
 use crate::actions::social::{SocialAction, SocialActionType};
 use crate::actions::faction::{FactionAction, FactionActionType};
 use crate::actions::conflict::{ConflictAction, ConflictActionType};
+use crate::actions::beer::{BeerAction, BeerActionType};
 use crate::components::agent::{AgentId, FoodSecurity, Needs, Role, SocialBelonging, Traits};
 use crate::components::faction::{FactionMembership, FactionRegistry};
 use crate::components::social::{MemoryValence, RelationshipGraph};
@@ -71,6 +72,9 @@ fn calculate_weight_modifier(
         }
         Action::Conflict(conflict_action) => {
             calculate_conflict_modifier(conflict_action, traits, needs, membership)
+        }
+        Action::Beer(beer_action) => {
+            calculate_beer_modifier(beer_action, traits, needs, membership)
         }
         Action::Idle => calculate_idle_modifier(traits, needs),
     }
@@ -422,6 +426,45 @@ fn calculate_conflict_modifier(
     }
 
     modifier.max(0.001)
+}
+
+/// Calculate beer action weight modifier
+fn calculate_beer_modifier(
+    action: &BeerAction,
+    traits: &Traits,
+    needs: &Needs,
+    _membership: &FactionMembership,
+) -> f32 {
+    let mut modifier = 1.0;
+
+    match action.action_type {
+        BeerActionType::Brew => {
+            // Loyal agents brew for faction
+            modifier *= 0.8 + traits.loyalty_weight * 0.4;
+            // Sociable agents brew more (for social events)
+            modifier *= 0.9 + traits.sociability * 0.2;
+        }
+        BeerActionType::Drink => {
+            // Sociability drives drinking
+            modifier *= 0.6 + traits.sociability * 0.8;
+            // Bold agents drink more
+            modifier *= 0.8 + traits.boldness * 0.4;
+            // Peripheral/isolated agents drink to cope
+            if needs.social_belonging != SocialBelonging::Integrated {
+                modifier *= 1.3;
+            }
+        }
+        BeerActionType::Share => {
+            // Highly social action
+            modifier *= 0.5 + traits.sociability * 1.0;
+            // Generous (low ambition) share more
+            modifier *= 1.2 - traits.ambition * 0.2;
+            // Loyal agents share with faction members
+            modifier *= 0.8 + traits.loyalty_weight * 0.3;
+        }
+    }
+
+    modifier.max(0.1)
 }
 
 #[cfg(test)]

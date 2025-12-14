@@ -27,6 +27,7 @@ pub struct GlobalResources {
     pub total_grain: u32,
     pub total_iron: u32,
     pub total_salt: u32,
+    pub total_beer: u32,
 }
 
 /// Faction snapshot
@@ -52,6 +53,7 @@ pub struct FactionResourcesSnapshot {
     pub grain: u32,
     pub iron: u32,
     pub salt: u32,
+    pub beer: u32,
 }
 
 /// Agent traits snapshot

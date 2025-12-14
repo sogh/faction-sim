@@ -68,19 +68,33 @@ pub struct FactionResources {
     pub grain: u32,
     pub iron: u32,
     pub salt: u32,
+    pub beer: u32,
 }
 
 impl FactionResources {
     pub fn new(grain: u32, iron: u32, salt: u32) -> Self {
-        Self { grain, iron, salt }
+        Self { grain, iron, salt, beer: 0 }
+    }
+
+    /// Create resources with beer included
+    pub fn with_beer(grain: u32, iron: u32, salt: u32, beer: u32) -> Self {
+        Self { grain, iron, salt, beer }
     }
 
     pub fn total(&self) -> u32 {
-        self.grain + self.iron + self.salt
+        self.grain + self.iron + self.salt + self.beer
     }
 
+    /// Check if food resources are critically low
+    /// Beer counts as 0.5 grain equivalent for this check
     pub fn is_critical(&self) -> bool {
-        self.grain < 100
+        let effective_food = self.grain as f32 + (self.beer as f32 * 0.5);
+        effective_food < 100.0
+    }
+
+    /// Get effective food value (grain + beer at 50% value)
+    pub fn effective_food(&self) -> f32 {
+        self.grain as f32 + (self.beer as f32 * 0.5)
     }
 }
 
@@ -332,6 +346,11 @@ impl FactionRegistry {
     /// Get all factions
     pub fn all_factions(&self) -> impl Iterator<Item = &Faction> {
         self.factions.values()
+    }
+
+    /// Get all factions mutably
+    pub fn all_factions_mut(&mut self) -> impl Iterator<Item = &mut Faction> {
+        self.factions.values_mut()
     }
 
     /// Get all faction IDs

@@ -24,6 +24,7 @@ pub struct Config {
     pub memory: MemoryConfig,
     pub trust: TrustConfig,
     pub drama: DramaConfig,
+    pub economy: EconomyConfig,
 }
 
 /// Simulation parameters
@@ -155,6 +156,31 @@ pub struct DramaConfig {
     pub desperate_state_multiplier: f32,
 }
 
+/// Economy and consumption parameters
+#[derive(Debug, Clone, Deserialize)]
+pub struct EconomyConfig {
+    /// Grain consumed per agent per day
+    pub grain_per_agent_per_day: f32,
+    /// Grain storage capacity per territory
+    pub grain_cap_per_territory: u32,
+    /// Beer storage capacity per territory
+    pub beer_cap_per_territory: u32,
+    /// Seasonal spoilage rate (fraction lost per season)
+    pub spoilage_rate: f32,
+    /// Grain cost to brew 1 beer
+    pub grain_per_beer: u32,
+    /// Nutritional value of beer relative to grain (0.5 = 50%)
+    pub beer_nutrition_ratio: f32,
+    /// Intoxication decay rate per tick
+    pub intoxication_decay_per_tick: f32,
+    /// Boldness boost at full intoxication
+    pub beer_boldness_boost: f32,
+    /// Honesty penalty at full intoxication
+    pub beer_honesty_penalty: f32,
+    /// Social belonging boost from drinking
+    pub beer_belonging_boost: f32,
+}
+
 impl Config {
     /// Load configuration from a TOML file
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
@@ -268,6 +294,18 @@ impl Default for Config {
                 close_relationship_multiplier: 1.4,
                 betrayal_multiplier: 1.8,
                 desperate_state_multiplier: 1.3,
+            },
+            economy: EconomyConfig {
+                grain_per_agent_per_day: 1.0,
+                grain_cap_per_territory: 500,
+                beer_cap_per_territory: 200,
+                spoilage_rate: 0.10,
+                grain_per_beer: 2,
+                beer_nutrition_ratio: 0.5,
+                intoxication_decay_per_tick: 0.05,
+                beer_boldness_boost: 0.2,
+                beer_honesty_penalty: 0.1,
+                beer_belonging_boost: 0.15,
             },
         }
     }

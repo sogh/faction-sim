@@ -134,6 +134,7 @@ mod tests {
                 Action::Social(_) => {}
                 Action::Faction(_) => {}
                 Action::Conflict(_) => {}
+                Action::Beer(_) => {}
             }
         }
 

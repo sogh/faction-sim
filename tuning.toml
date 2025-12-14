@@ -123,3 +123,22 @@ enemy_faction_multiplier = 1.5
 close_relationship_multiplier = 1.4
 betrayal_multiplier = 1.8
 desperate_state_multiplier = 1.3
+
+[economy]
+# Consumption settings
+grain_per_agent_per_day = 1.0          # Each agent consumes 1 grain per day
+
+# Storage caps (per territory owned)
+grain_cap_per_territory = 500           # Max grain = territories * 500
+beer_cap_per_territory = 200            # Max beer = territories * 200
+
+# Spoilage (applied once per season)
+spoilage_rate = 0.10                    # 10% of grain/beer spoils each season
+
+# Beer brewing and effects
+grain_per_beer = 2                      # 2 grain required to brew 1 beer
+beer_nutrition_ratio = 0.5              # 1 beer = 0.5 grain for food security
+intoxication_decay_per_tick = 0.05      # ~20 ticks to fully sober
+beer_boldness_boost = 0.2               # +0.2 boldness at full intoxication
+beer_honesty_penalty = 0.1              # -0.1 honesty at full intoxication
+beer_belonging_boost = 0.15             # Social belonging improvement from drinking

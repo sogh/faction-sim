@@ -9,6 +9,7 @@ pub mod resource;
 pub mod social;
 pub mod faction;
 pub mod conflict;
+pub mod beer;
 
 pub use movement::*;
 pub use communication::*;
@@ -17,3 +18,4 @@ pub use resource::*;
 pub use social::*;
 pub use faction::*;
 pub use conflict::*;
+pub use beer::*;

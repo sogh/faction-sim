@@ -12,7 +12,8 @@ use crate::actions::resource::{ResourceAction, ResourceActionType, resource_weig
 use crate::actions::social::{SocialAction, SocialActionType, social_weights};
 use crate::actions::faction::{FactionAction, FactionActionType, faction_weights};
 use crate::actions::conflict::{ConflictAction, ConflictActionType, conflict_weights};
-use crate::components::agent::{AgentId, AgentName, FoodSecurity, Goals, GoalType, Needs, Role, SocialBelonging, Traits};
+use crate::actions::beer::{BeerAction, BeerActionType, beer_weights};
+use crate::components::agent::{AgentId, AgentName, FoodSecurity, Goals, GoalType, Intoxication, Needs, Role, SocialBelonging, Traits};
 use crate::components::faction::{FactionMembership, FactionRegistry};
 use crate::components::social::{MemoryBank, MemoryValence, RelationshipGraph};
 use crate::components::world::{LocationRegistry, Position};
@@ -36,6 +37,8 @@ pub enum Action {
     Faction(FactionAction),
     /// Conflict actions (argue, fight, sabotage, assassinate)
     Conflict(ConflictAction),
+    /// Beer-related actions (brew, drink, share)
+    Beer(BeerAction),
     /// Stay at current location (default/idle action)
     Idle,
 }
@@ -933,6 +936,106 @@ pub fn generate_conflict_actions(
                         Action::Conflict(action),
                         weight.max(0.0001),
                         format!("assassinate {}", target_id),
+                    ),
+                );
+            }
+        }
+    }
+}
+
+/// System to generate beer-related actions (brew, drink, share)
+///
+/// Generates actions for brewing beer from grain, drinking for social benefits,
+/// and sharing beer with others to build trust.
+pub fn generate_beer_actions(
+    faction_registry: Res<FactionRegistry>,
+    agents_by_location: Res<AgentsByLocation>,
+    mut pending_actions: ResMut<PendingActions>,
+    query: Query<(&AgentId, &Position, &FactionMembership, &Needs, &Traits, &Intoxication)>,
+) {
+    for (agent_id, position, membership, needs, traits, intoxication) in query.iter() {
+        let Some(faction) = faction_registry.get(&membership.faction_id) else {
+            continue;
+        };
+
+        let at_territory = faction.territory.contains(&position.location_id);
+
+        // Brew action - available when at territory with sufficient grain
+        if at_territory && faction.resources.grain >= beer_weights::BREW_GRAIN_THRESHOLD {
+            let mut weight = beer_weights::BREW_BASE;
+
+            // Bonus if we have lots of grain (> 200 per territory)
+            let territory_count = faction.territory.len().max(1) as u32;
+            let grain_per_territory = faction.resources.grain / territory_count;
+            if grain_per_territory > 200 {
+                weight += beer_weights::BREW_EXCESS_GRAIN_BONUS;
+            }
+
+            // Penalty if grain is scarce
+            if faction.resources.is_critical() {
+                weight -= beer_weights::BREW_SCARCE_GRAIN_PENALTY;
+            }
+
+            // Sociable agents brew more
+            weight += traits.sociability * 0.1;
+
+            let action = BeerAction::brew(&agent_id.0, 1);
+            pending_actions.add(
+                &agent_id.0,
+                WeightedAction::new(
+                    Action::Beer(action),
+                    weight.max(0.01),
+                    "brew beer",
+                ),
+            );
+        }
+
+        // Drink action - available when faction has beer and not too intoxicated
+        if faction.resources.beer > 0 && intoxication.level < beer_weights::DRINK_MAX_INTOX {
+            let mut weight = beer_weights::DRINK_BASE;
+            weight += traits.sociability * beer_weights::DRINK_SOCIABILITY_BONUS;
+
+            // Bonus for seeking belonging (peripheral/isolated agents)
+            if needs.social_belonging != SocialBelonging::Integrated {
+                weight += beer_weights::DRINK_BELONGING_BONUS;
+            }
+
+            // Bold agents drink more
+            weight += traits.boldness * 0.1;
+
+            let action = BeerAction::drink(&agent_id.0);
+            pending_actions.add(
+                &agent_id.0,
+                WeightedAction::new(
+                    Action::Beer(action),
+                    weight,
+                    "drink beer",
+                ),
+            );
+        }
+
+        // Share action - available when beer exists and others nearby
+        if faction.resources.beer > 1 {
+            let nearby_agents = agents_by_location.at_location(&position.location_id);
+
+            for target_id in nearby_agents {
+                if target_id == &agent_id.0 {
+                    continue;
+                }
+
+                let mut weight = beer_weights::SHARE_BASE;
+                weight += traits.sociability * beer_weights::SHARE_SOCIABILITY_BONUS;
+
+                // Generous (low ambition) agents share more
+                weight += (1.0 - traits.ambition) * 0.1;
+
+                let action = BeerAction::share(&agent_id.0, target_id);
+                pending_actions.add(
+                    &agent_id.0,
+                    WeightedAction::new(
+                        Action::Beer(action),
+                        weight,
+                        format!("share beer with {}", target_id),
                     ),
                 );
             }

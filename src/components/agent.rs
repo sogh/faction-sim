@@ -272,3 +272,63 @@ impl Alive {
         self.0
     }
 }
+
+/// Temporary intoxication state from beer consumption
+#[derive(Component, Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Intoxication {
+    /// Current intoxication level (0.0 to 1.0)
+    pub level: f32,
+    /// Tick when last drink was consumed
+    pub last_drink_tick: u64,
+    /// Boldness modifier while intoxicated (+0.2 at full intoxication)
+    pub boldness_modifier: f32,
+    /// Honesty modifier while intoxicated (-0.1 at full intoxication)
+    pub honesty_modifier: f32,
+}
+
+impl Intoxication {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Apply the effect of drinking beer
+    pub fn apply_drink(&mut self, current_tick: u64) {
+        // Each drink adds 0.3 to intoxication, max 1.0
+        self.level = (self.level + 0.3).min(1.0);
+        self.last_drink_tick = current_tick;
+        // Modifiers scale with intoxication level
+        self.update_modifiers();
+    }
+
+    /// Update trait modifiers based on current level
+    fn update_modifiers(&mut self) {
+        // At full intoxication: +0.2 boldness, -0.1 honesty
+        self.boldness_modifier = self.level * 0.2;
+        self.honesty_modifier = self.level * -0.1;
+    }
+
+    /// Check if agent is currently intoxicated
+    pub fn is_intoxicated(&self) -> bool {
+        self.level > 0.1
+    }
+
+    /// Decay intoxication over time
+    /// Full decay takes about 20 ticks (2 days)
+    pub fn decay(&mut self, ticks_elapsed: u64) {
+        if self.level > 0.0 {
+            let decay_amount = 0.05 * ticks_elapsed as f32;
+            self.level = (self.level - decay_amount).max(0.0);
+            self.update_modifiers();
+        }
+    }
+
+    /// Get effective boldness with intoxication modifier
+    pub fn effective_boldness(&self, base_boldness: f32) -> f32 {
+        (base_boldness + self.boldness_modifier).clamp(0.0, 1.0)
+    }
+
+    /// Get effective honesty with intoxication modifier
+    pub fn effective_honesty(&self, base_honesty: f32) -> f32 {
+        (base_honesty + self.honesty_modifier).clamp(0.0, 1.0)
+    }
+}
