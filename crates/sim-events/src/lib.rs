@@ -2,11 +2,18 @@
 //!
 //! This crate contains pure data structures with no simulation logic.
 //! It is a dependency for all other crates in the workspace.
+//!
+//! # Features
+//!
+//! - `test-fixtures`: Enables the `fixtures` module with sample test data.
 
 pub mod event;
 pub mod snapshot;
 pub mod tension;
 pub mod timestamp;
+
+#[cfg(feature = "test-fixtures")]
+pub mod fixtures;
 
 // Re-export timestamp types
 pub use timestamp::{

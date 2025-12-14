@@ -91,11 +91,51 @@ Implement all sim-events types based on prompts 1-10 from SIM_EVENTS_IMPLEMENTAT
 
 ---
 
+### Prompt 11: Sample Data Fixtures - COMPLETE
+
+**Created test fixtures directory and files:**
+
+`tests/fixtures/sample_events.jsonl`:
+- 10 diverse events covering movement, communication, resource, betrayal, ritual, death, faction types
+- Drama scores range from 0.05 (routine patrol) to 0.87 (betrayal)
+- Includes connected events and narrative complexity
+
+`tests/fixtures/sample_tensions.json`:
+- 2 tensions: brewing_betrayal (severity 0.85), resource_conflict (severity 0.55)
+- Predicted outcomes with probabilities
+- Narrative hooks and camera recommendations
+
+`tests/fixtures/sample_state.json`:
+- Complete WorldSnapshot with 2 factions (Thornwood, Ironmere)
+- 6 agents with traits, goals, and relationships
+- 5 locations with properties
+- Computed metrics including social network analysis
+
+**Created `fixtures.rs` module:**
+- `sample_events()`, `sample_tensions()`, `sample_snapshot()` - Load fixture files
+- `get_event()`, `get_tension()` - Find by ID
+- `betrayal_event()`, `brewing_betrayal_tension()` - Convenience helpers
+- 7 unit tests verifying fixture loading and data integrity
+
+**Feature-gated in Cargo.toml:**
+```toml
+[features]
+test-fixtures = []
+```
+
+**Conditional export in lib.rs:**
+```rust
+#[cfg(feature = "test-fixtures")]
+pub mod fixtures;
+```
+
+---
+
 ## Final Test Results
 
 ```
-running 61 tests ... test result: ok. 61 passed
-running 3 tests ... test result: ok. 3 passed (doc tests)
+running 68 tests ... test result: ok. 68 passed
+running 4 tests ... test result: ok. 3 passed; 1 ignored (doc tests)
 ```
 
 **Full workspace builds successfully.**
