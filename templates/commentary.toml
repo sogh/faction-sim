@@ -1,0 +1,366 @@
+# Commentary Templates for Director AI
+#
+# This file defines templates for generating text overlays and captions.
+# Templates use placeholders that get filled with event/tension data.
+#
+# Available placeholders for event captions:
+#   {primary_name}     - Name of the primary actor
+#   {primary_faction}  - Faction of the primary actor
+#   {primary_role}     - Role of the primary actor
+#   {secondary_name}   - Name of the secondary actor (empty if none)
+#   {secondary_faction} - Faction of the secondary actor
+#   {location}         - Location where event occurred
+#   {affected_names}   - Comma-separated names of affected actors
+
+[event_captions]
+
+# Betrayal events - high drama
+"betrayal.secretsharedwithenemy" = [
+    "{primary_name} shares faction secrets with {secondary_name}",
+    "At {location}, {primary_name} crosses a line that cannot be uncrossed",
+    "A whispered betrayal: {primary_name} reveals secrets to {secondary_name}",
+    "In the shadows of {location}, loyalty dies",
+]
+"betrayal.defection" = [
+    "{primary_name} abandons {primary_faction}",
+    "A traitor reveals themselves: {primary_name} defects",
+    "{primary_name} turns their back on {primary_faction}",
+    "The bonds of {primary_faction} were not strong enough to hold {primary_name}",
+]
+"betrayal.sabotage" = [
+    "{primary_name} sabotages their own faction",
+    "Sabotage in {location}: {primary_name}'s loyalty fractures",
+    "From within, the damage is done",
+]
+"betrayal.falsetestimony" = [
+    "{primary_name} speaks lies against {secondary_name}",
+    "False words from {primary_name} poison the truth",
+]
+
+# Death events
+"death.killed" = [
+    "{primary_name} has fallen",
+    "Death claims {primary_name}",
+    "{primary_name}'s story ends here",
+    "The end comes for {primary_name}",
+]
+"death.natural" = [
+    "{primary_name} passes peacefully",
+    "Time claims {primary_name}",
+    "{primary_name} joins the ancestors",
+]
+"death.executed" = [
+    "{primary_name} is executed",
+    "Justice—or vengeance—claims {primary_name}",
+    "The sentence is carried out on {primary_name}",
+]
+"death.sacrifice" = [
+    "{primary_name} makes the ultimate sacrifice",
+    "In death, {primary_name} gives everything",
+]
+
+# Ritual events
+"ritual.readingheld" = [
+    "The faithful gather at {location}",
+    "{primary_name} opens the book of {primary_faction}",
+    "A ritual reading begins at {location}",
+    "History speaks through {primary_name}",
+]
+"ritual.readingdisrupted" = [
+    "The reading is disrupted!",
+    "Chaos at {location}: the ritual cannot continue",
+    "Someone has broken the sacred silence",
+]
+"ritual.readingattended" = [
+    "{primary_name} joins the gathering",
+]
+"ritual.readingmissed" = [
+    "{primary_name} is notably absent from the reading",
+    "Where is {primary_name}?",
+]
+
+# Movement events
+"movement.travel" = [
+    "{primary_name} journeys to {location}",
+    "{primary_name} arrives at {location}",
+]
+"movement.flee" = [
+    "{primary_name} flees in desperation",
+    "Fear drives {primary_name} away",
+    "{primary_name} runs from what cannot be outrun",
+]
+"movement.pursue" = [
+    "{primary_name} gives chase",
+    "The hunt begins",
+]
+"movement.patrol" = [
+    "{primary_name} keeps watch",
+]
+
+# Conflict events
+"conflict.fight" = [
+    "Violence erupts between {primary_name} and {secondary_name}",
+    "{primary_name} clashes with {secondary_name}",
+    "Blood is spilled at {location}",
+]
+"conflict.duel" = [
+    "{primary_name} faces {secondary_name} in single combat",
+    "A duel to settle old scores",
+    "Honor demands satisfaction",
+]
+"conflict.argument" = [
+    "Heated words between {primary_name} and {secondary_name}",
+    "Tensions rise at {location}",
+]
+"conflict.raid" = [
+    "Raiders strike at {location}",
+    "{primary_name} leads an attack",
+]
+
+# Cooperation events
+"cooperation.allianceformed" = [
+    "{primary_name} and {secondary_name} forge an alliance",
+    "New bonds form between {primary_faction} and {secondary_faction}",
+    "An unlikely partnership emerges",
+]
+"cooperation.trade" = [
+    "{primary_name} trades with {secondary_name}",
+    "Commerce at {location}",
+]
+"cooperation.gift" = [
+    "{primary_name} offers a gift to {secondary_name}",
+    "Generosity from {primary_name}",
+]
+"cooperation.favor" = [
+    "{primary_name} owes {secondary_name} a favor",
+]
+
+# Faction events
+"faction.join" = [
+    "{primary_name} joins {primary_faction}",
+    "A new member for {primary_faction}: {primary_name}",
+    "{primary_faction} grows stronger",
+]
+"faction.leave" = [
+    "{primary_name} leaves {primary_faction}",
+    "The ties that bind are severed",
+]
+"faction.exile" = [
+    "{primary_name} is exiled from {primary_faction}",
+    "Cast out: {primary_name} loses everything",
+    "No longer welcome among {primary_faction}",
+]
+"faction.promotion" = [
+    "{primary_name} rises within {primary_faction}",
+    "New responsibilities for {primary_name}",
+]
+"faction.demotion" = [
+    "{primary_name} falls from favor",
+    "Disgrace for {primary_name}",
+]
+
+# Communication events
+"communication.sharememory" = [
+    "{primary_name} confides in {secondary_name}",
+    "Stories are shared at {location}",
+]
+"communication.spreadrumor" = [
+    "Whispers spread from {primary_name}",
+    "Rumors take flight",
+]
+"communication.lie" = [
+    "{primary_name} speaks with forked tongue",
+]
+"communication.confess" = [
+    "{primary_name} reveals the truth",
+    "A confession at {location}",
+]
+
+# Resource events
+"resource.acquire" = [
+    "{primary_name} gathers supplies",
+]
+"resource.steal" = [
+    "{primary_name} takes what isn't theirs",
+    "Theft at {location}",
+]
+"resource.hoard" = [
+    "{primary_name} keeps more than their share",
+]
+
+# Archive events
+"archive.writeentry" = [
+    "{primary_name} records history",
+    "The archives grow",
+]
+"archive.readentry" = [
+    "{primary_name} studies the past",
+]
+"archive.destroyentry" = [
+    "History is erased",
+    "{primary_name} destroys what should be remembered",
+]
+"archive.forgeentry" = [
+    "False history is written",
+    "{primary_name} corrupts the record",
+]
+
+# Dramatic irony templates
+# Placeholders: {unaware_agent}, {betrayer}, {betrayal_location}, {secret_info}
+
+[[dramatic_irony]]
+pattern = "unaware_of_betrayal"
+templates = [
+    "{unaware_agent} still trusts {betrayer}—for now",
+    "If only {unaware_agent} knew what {betrayer} did",
+    "{unaware_agent} has no idea about {betrayer}'s treachery",
+    "The truth about {betrayer} remains hidden from {unaware_agent}",
+]
+required_context = ["unaware_agent", "betrayer"]
+
+[[dramatic_irony]]
+pattern = "walking_into_trap"
+templates = [
+    "{unaware_agent} walks unknowingly toward danger",
+    "They don't know what awaits them at {betrayal_location}",
+    "If only someone could warn {unaware_agent}",
+]
+required_context = ["unaware_agent"]
+
+[[dramatic_irony]]
+pattern = "hidden_alliance"
+templates = [
+    "{unaware_agent} doesn't see the connection",
+    "Secret allies move unseen",
+]
+required_context = ["unaware_agent"]
+
+[[dramatic_irony]]
+pattern = "doomed_trust"
+templates = [
+    "This trust will not last",
+    "If only they knew what's coming",
+]
+required_context = []
+
+# Tension teasers
+# These hint at developing situations without revealing details
+
+[[tension_teasers]]
+tension_type = "brewingbetrayal"
+templates = [
+    "Loyalty frays at the edges...",
+    "Someone is having second thoughts",
+    "Trust is a fragile thing",
+    "Not everyone is who they seem",
+]
+min_severity = 0.3
+
+[[tension_teasers]]
+tension_type = "resourceconflict"
+templates = [
+    "Resources grow scarce...",
+    "Winter stores are running low...",
+    "There isn't enough for everyone",
+    "Hunger makes enemies of friends",
+]
+min_severity = 0.4
+
+[[tension_teasers]]
+tension_type = "successioncrisis"
+templates = [
+    "Leadership hangs in the balance",
+    "Who will lead when the dust settles?",
+    "Power abhors a vacuum",
+    "The old order trembles",
+]
+min_severity = 0.5
+
+[[tension_teasers]]
+tension_type = "revengearc"
+templates = [
+    "Old wounds refuse to heal",
+    "Vengeance simmers beneath the surface",
+    "Some debts must be paid in blood",
+    "The past is never truly past",
+]
+min_severity = 0.4
+
+[[tension_teasers]]
+tension_type = "forbiddenalliance"
+templates = [
+    "Unlikely connections form in the shadows",
+    "Not all bonds respect faction lines",
+    "Some friendships must stay hidden",
+]
+min_severity = 0.3
+
+[[tension_teasers]]
+tension_type = "risingpower"
+templates = [
+    "Someone's influence grows",
+    "A new player emerges",
+    "The balance of power shifts",
+]
+min_severity = 0.4
+
+[[tension_teasers]]
+tension_type = "factionfracture"
+templates = [
+    "Cracks appear within {primary_faction}",
+    "Unity is tested",
+    "Not all agree on the path forward",
+]
+min_severity = 0.5
+
+[[tension_teasers]]
+tension_type = "externalthreat"
+templates = [
+    "Danger approaches from outside",
+    "The world beyond stirs",
+    "Something wicked this way comes",
+]
+min_severity = 0.4
+
+[[tension_teasers]]
+tension_type = "secretexposed"
+templates = [
+    "The truth struggles to surface",
+    "Secrets have a way of escaping",
+    "What's hidden will be found",
+]
+min_severity = 0.5
+
+[[tension_teasers]]
+tension_type = "ritualdisruption"
+templates = [
+    "The sacred ways are threatened",
+    "Tradition hangs by a thread",
+]
+min_severity = 0.5
+
+# Context reminders (for referencing past events)
+
+[[context_reminders]]
+context_type = "past_betrayal"
+templates = [
+    "Three seasons ago, trust was broken here",
+    "This isn't the first betrayal these walls have seen",
+]
+min_ticks_ago = 10000
+
+[[context_reminders]]
+context_type = "old_alliance"
+templates = [
+    "Once, these factions stood together",
+    "They were allies, before everything changed",
+]
+min_ticks_ago = 20000
+
+[[context_reminders]]
+context_type = "fallen_leader"
+templates = [
+    "The old leader would have handled this differently",
+    "Things were different under the previous rule",
+]
+min_ticks_ago = 15000

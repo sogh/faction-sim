@@ -52,3 +52,9 @@ pub use config::{
 
 // Re-export focus types
 pub use focus::FocusSelector;
+
+// Re-export commentary types
+pub use commentary::{
+    default_templates, default_templates_toml, CommentaryGenerator, CommentaryTemplates,
+    IronySituation, IronyTemplate, ReminderTemplate, TeaserTemplate, TemplateError,
+};
