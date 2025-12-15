@@ -364,8 +364,9 @@ fn advance_playback(time: Res<Time>, mut playback: ResMut<PlaybackState>) {
     }
 
     // Advance by speed * delta_time (speed is ticks per second)
-    // Base rate: 60 ticks per second at 1x speed
-    let ticks_per_second = 60.0 * playback.speed as f64;
+    // Base rate: 0.1 ticks per second at 1x speed (1 tick per 10 seconds)
+    // At 2x speed: 0.2 ticks/sec, at 10x speed: 1 tick/sec
+    let ticks_per_second = 0.1 * playback.speed as f64;
     let delta_ticks = ticks_per_second * time.delta_seconds_f64();
 
     playback.current_tick += delta_ticks;

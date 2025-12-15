@@ -140,6 +140,9 @@ impl SimRunner {
         // Stop any existing simulation first
         self.stop();
 
+        // Clear old output files to avoid stale data
+        Self::clear_output_directory(&config.output_dir);
+
         let mut cmd = Command::new("cargo");
         cmd.arg("run")
             .arg("-p")
@@ -228,6 +231,28 @@ impl SimRunner {
     /// Check if simulation is currently running.
     pub fn is_running(&self) -> bool {
         matches!(self.status, SimStatus::Starting | SimStatus::Running { .. })
+    }
+
+    /// Clear old output files to avoid stale data from previous runs.
+    fn clear_output_directory(output_dir: &PathBuf) {
+        let snapshots_dir = output_dir.join("snapshots");
+        if snapshots_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&snapshots_dir) {
+                tracing::warn!("Failed to clear snapshots directory: {}", e);
+            } else {
+                tracing::info!("Cleared old snapshots from {:?}", snapshots_dir);
+            }
+        }
+
+        // Also clear events.jsonl and tensions.json
+        let events_file = output_dir.join("events.jsonl");
+        if events_file.exists() {
+            let _ = std::fs::remove_file(&events_file);
+        }
+        let tensions_file = output_dir.join("tensions.json");
+        if tensions_file.exists() {
+            let _ = std::fs::remove_file(&tensions_file);
+        }
     }
 
     /// Poll for process output and status updates.
@@ -333,15 +358,27 @@ impl SimRunner {
 /// Parse tick progress from simulation output.
 fn parse_tick_progress(line: &str) -> Option<(u64, u64)> {
     // Try to match patterns like:
-    // "Tick 100/2000"
-    // "Processing tick 100 of 2000"
+    // "Tick 100 / 200 (Year...)" - progress output from sim-core
     // "tick=100 max=2000"
 
-    // Pattern 1: "Tick X/Y"
+    // Pattern 1: "Tick X / Y" with spaces (sim-core progress format)
+    // Must have the " / " separator to distinguish from "[Tick X]" event logs
     if let Some(rest) = line.strip_prefix("Tick ") {
-        if let Some((current, max)) = rest.split_once('/') {
-            if let (Ok(c), Ok(m)) = (current.trim().parse(), max.trim().parse()) {
-                return Some((c, m));
+        // Look for " / " pattern
+        if let Some((current_part, max_part)) = rest.split_once(" / ") {
+            let current: u64 = current_part.trim().parse().ok()?;
+            // max_part might be "200 (Year 1, ...)" so just take first number
+            let max_str = max_part.split_whitespace().next()?;
+            let max: u64 = max_str.trim_matches(|c: char| !c.is_ascii_digit()).parse().ok()?;
+            return Some((current, max));
+        }
+        // Also try "Tick X/Y" without spaces
+        if let Some((current_part, max_part)) = rest.split_once('/') {
+            if !max_part.contains(' ') || max_part.starts_with(char::is_numeric) {
+                let current: u64 = current_part.trim().parse().ok()?;
+                let max_str = max_part.split_whitespace().next().unwrap_or(max_part);
+                let max: u64 = max_str.trim().parse().ok()?;
+                return Some((current, max));
             }
         }
     }
@@ -360,19 +397,6 @@ fn parse_tick_progress(line: &str) -> Option<(u64, u64)> {
         }
         if let (Some(c), Some(m)) = (current, max) {
             return Some((c, m));
-        }
-    }
-
-    // Pattern 3: Look for "tick X of Y" or "tick X / Y"
-    let lower = line.to_lowercase();
-    if lower.contains("tick") {
-        // Simple number extraction
-        let numbers: Vec<u64> = line
-            .split(|c: char| !c.is_ascii_digit())
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        if numbers.len() >= 2 {
-            return Some((numbers[0], numbers[1]));
         }
     }
 
@@ -463,9 +487,15 @@ mod tests {
 
     #[test]
     fn test_parse_tick_progress() {
+        // Pattern 1: "Tick X / Y" with spaces (sim-core progress format)
+        assert_eq!(parse_tick_progress("Tick 100 / 200 (Year 1, Spring, Day 11)"), Some((100, 200)));
+        assert_eq!(parse_tick_progress("Tick 50 / 1000"), Some((50, 1000)));
+        // Pattern 1b: "Tick X/Y" without spaces
         assert_eq!(parse_tick_progress("Tick 100/2000"), Some((100, 2000)));
+        // Pattern 2: tick= max= format
         assert_eq!(parse_tick_progress("tick=50 max=1000"), Some((50, 1000)));
-        assert_eq!(parse_tick_progress("Processing tick 200 of 500"), Some((200, 500)));
+        // Should NOT match event log format "[Tick X]"
+        assert_eq!(parse_tick_progress("[Tick 100] Year 1, Spring, Day 11 - 50 events"), None);
     }
 
     #[test]
