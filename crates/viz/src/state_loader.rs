@@ -380,10 +380,9 @@ fn advance_playback(time: Res<Time>, mut playback: ResMut<PlaybackState>) {
 
 /// System to load the appropriate snapshot for the current playback tick.
 fn load_snapshot_for_playback(
-    cache: Res<SnapshotCache>,
+    mut cache: ResMut<SnapshotCache>,
     playback: Res<PlaybackState>,
     mut state: ResMut<SimulationState>,
-    mut snapshot_cache: ResMut<SnapshotCache>,
     mut events: EventWriter<StateUpdatedEvent>,
 ) {
     let target_tick = playback.tick_for_snapshot();
@@ -394,14 +393,14 @@ fn load_snapshot_for_playback(
     };
 
     // Skip if we already have this snapshot loaded
-    if snapshot_cache.loaded_tick == Some(snapshot_tick) {
+    if cache.loaded_tick == Some(snapshot_tick) {
         return;
     }
 
     // Load the snapshot
     let path = PathBuf::from(format!("output/snapshots/snap_{:06}.json", snapshot_tick));
     if load_state_file(&path, &mut state) {
-        snapshot_cache.loaded_tick = Some(snapshot_tick);
+        cache.loaded_tick = Some(snapshot_tick);
         events.send(StateUpdatedEvent {
             tick: state.current_tick(),
         });
