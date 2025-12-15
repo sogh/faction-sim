@@ -22,6 +22,7 @@ tokio = { version = "1.0", features = ["full"] }
 tracing = "0.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 rand = { version = "0.8", features = ["small_rng"] }
+clap = { version = "4.5", features = ["derive"] }
 
 # Bevy for visualization
 bevy = "0.14"

@@ -8,7 +8,7 @@ use clap::Parser;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // Use the library's modules instead of local duplicates to avoid type mismatches
 use sim_core::components;
@@ -65,6 +65,14 @@ struct Args {
     /// Output initial world state as JSON
     #[arg(long)]
     output_initial_state: bool,
+
+    /// Resume simulation from a snapshot file
+    #[arg(long)]
+    from_snapshot: Option<PathBuf>,
+
+    /// Starting tick when resuming from snapshot (auto-detected if not specified)
+    #[arg(long)]
+    start_tick: Option<u64>,
 }
 
 /// Global simulation state resource
@@ -87,6 +95,9 @@ fn main() {
     println!("Ticks: {}", args.ticks);
     println!("Snapshot interval: {}", args.snapshot_interval);
     println!("Ritual interval: {}", args.ritual_interval);
+    if let Some(ref path) = args.from_snapshot {
+        println!("Resuming from: {:?}", path);
+    }
     println!();
 
     // Ensure output directories exist
@@ -152,6 +163,11 @@ fn main() {
     // Initialize intervention system
     world.insert_resource(PendingInterventions::new());
 
+    // Initialize event logger
+    let event_logger = events::EventLogger::new("output/events.jsonl")
+        .expect("Failed to create event logger");
+    world.insert_resource(event_logger);
+
     // Spawn agents
     println!("Spawning agents...");
     {
@@ -169,22 +185,39 @@ fn main() {
     // Initialize snapshot generator
     world.insert_resource(output::SnapshotGenerator::new(args.snapshot_interval));
 
-    // Output initial state if requested
-    if args.output_initial_state {
-        output_initial_state(&world);
-    }
-
-    // Generate initial snapshot
-    println!("Generating initial snapshot...");
-    let initial_snapshot = output::generate_snapshot(&mut world, "simulation_start");
-    if let Err(e) = output::write_snapshot_to_dir(&initial_snapshot) {
-        eprintln!("  Warning: Could not write initial snapshot: {}", e);
-    }
-    if let Err(e) = output::write_current_state(&initial_snapshot) {
-        eprintln!("  Warning: Could not write current state: {}", e);
+    // Restore from snapshot if requested
+    let start_tick = if let Some(snapshot_path) = &args.from_snapshot {
+        println!("Loading snapshot from {:?}...", snapshot_path);
+        match output::load_snapshot(snapshot_path) {
+            Ok(snapshot) => {
+                let tick = output::restore_from_snapshot(&mut world, &snapshot);
+                println!("  Restored world state at tick {}", tick);
+                args.start_tick.unwrap_or(tick)
+            }
+            Err(e) => {
+                eprintln!("Error loading snapshot: {}", e);
+                std::process::exit(1);
+            }
+        }
     } else {
-        println!("  Wrote initial snapshot (tick 0)");
-    }
+        // Output initial state if requested (only for fresh simulations)
+        if args.output_initial_state {
+            output_initial_state(&world);
+        }
+
+        // Generate initial snapshot
+        println!("Generating initial snapshot...");
+        let initial_snapshot = output::generate_snapshot(&mut world, "simulation_start");
+        if let Err(e) = output::write_snapshot_to_dir(&initial_snapshot) {
+            eprintln!("  Warning: Could not write initial snapshot: {}", e);
+        }
+        if let Err(e) = output::write_current_state(&initial_snapshot) {
+            eprintln!("  Warning: Could not write current state: {}", e);
+        } else {
+            println!("  Wrote initial snapshot (tick 0)");
+        }
+        0
+    };
 
     // Create the schedule
     let mut schedule = Schedule::default();
@@ -307,8 +340,11 @@ fn main() {
     println!("Starting simulation...");
     println!();
 
+    // Calculate end tick (start_tick + ticks)
+    let end_tick = start_tick + args.ticks;
+
     // Main simulation loop
-    for tick in 0..args.ticks {
+    for tick in start_tick..end_tick {
         // Update current tick (set both to same value to avoid off-by-one)
         world.resource_mut::<SimulationState>().current_tick = tick;
         world.resource_mut::<world::WorldState>().set_tick(tick);
@@ -369,7 +405,19 @@ fn main() {
             }
         }
 
-        // Clear events after reporting (they'd be logged to file in full implementation)
+        // Log events before clearing
+        {
+            let events_to_log: Vec<_> = world
+                .resource::<systems::TickEvents>()
+                .events
+                .clone();
+            if !events_to_log.is_empty() {
+                let mut logger = world.resource_mut::<events::EventLogger>();
+                if let Err(e) = logger.log_batch(&events_to_log) {
+                    eprintln!("Warning: Failed to log events: {}", e);
+                }
+            }
+        }
         world.resource_mut::<systems::TickEvents>().events.clear();
 
         // Generate periodic snapshots
@@ -394,10 +442,15 @@ fn main() {
             println!(
                 "Tick {} / {} ({})",
                 tick,
-                args.ticks,
+                end_tick,
                 world_state.formatted_date()
             );
         }
+    }
+
+    // Flush event logger
+    if let Err(e) = world.resource_mut::<events::EventLogger>().flush() {
+        eprintln!("Warning: Failed to flush event logger: {}", e);
     }
 
     // Generate final snapshot
@@ -412,8 +465,10 @@ fn main() {
     println!();
     let world_state = world.resource::<world::WorldState>();
     println!(
-        "Simulation complete. Ran {} ticks (ending on {}).",
+        "Simulation complete. Ran {} ticks ({} to {}, ending on {}).",
         args.ticks,
+        start_tick,
+        end_tick,
         world_state.formatted_date()
     );
 

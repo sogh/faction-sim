@@ -8,7 +8,9 @@ pub mod agents;
 pub mod camera;
 pub mod debug;
 pub mod director_state;
+pub mod intervention;
 pub mod overlay;
+pub mod sim_runner;
 pub mod state_loader;
 pub mod world;
 

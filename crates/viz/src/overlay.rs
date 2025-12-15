@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 
 use crate::camera::CameraController;
 use crate::director_state::DirectorState;
+use crate::sim_runner::{SimRunner, SimStatus};
 use crate::state_loader::SimulationState;
 
 /// Plugin for UI overlay rendering.
@@ -18,6 +19,7 @@ impl Plugin for OverlayPlugin {
                 Update,
                 (
                     update_status_bar,
+                    update_sim_status_display,
                     update_commentary_display,
                     fade_commentary,
                     update_playback_controls,
@@ -60,6 +62,10 @@ pub struct TickDisplay;
 /// Component marking the camera mode display.
 #[derive(Component)]
 pub struct CameraModeDisplay;
+
+/// Component marking the simulation status display.
+#[derive(Component)]
+pub struct SimStatusDisplay;
 
 /// Component marking the commentary container.
 #[derive(Component)]
@@ -155,6 +161,19 @@ fn spawn_status_bar(parent: &mut ChildBuilder) {
                     },
                 ),
                 TickDisplay,
+            ));
+
+            // Center: Simulation status display
+            parent.spawn((
+                TextBundle::from_section(
+                    "Sim: Idle | [S] Start",
+                    TextStyle {
+                        font_size: 14.0,
+                        color: Color::srgb(0.8, 0.8, 0.5),
+                        ..default()
+                    },
+                ),
+                SimStatusDisplay,
             ));
 
             // Right side: Camera mode display
@@ -367,6 +386,40 @@ fn update_status_bar(
             "Manual"
         };
         text.sections[0].value = format!("Camera: {}", mode_str);
+    }
+}
+
+/// System to update simulation status display.
+fn update_sim_status_display(
+    sim_runner: Res<SimRunner>,
+    mut status_query: Query<&mut Text, With<SimStatusDisplay>>,
+) {
+    for mut text in status_query.iter_mut() {
+        let (status_text, color) = match &sim_runner.status {
+            SimStatus::Idle => ("Sim: Idle | [S] Start".to_string(), Color::srgb(0.6, 0.6, 0.6)),
+            SimStatus::Starting => ("Sim: Starting...".to_string(), Color::srgb(0.8, 0.8, 0.5)),
+            SimStatus::Running { current_tick, max_ticks } => {
+                let percent = (*current_tick as f32 / *max_ticks as f32 * 100.0) as u32;
+                (
+                    format!("Sim: {}/{} ({}%)", current_tick, max_ticks, percent),
+                    Color::srgb(0.5, 0.8, 0.5),
+                )
+            }
+            SimStatus::Completed { final_tick } => {
+                (format!("Sim: Complete ({})", final_tick), Color::srgb(0.5, 0.8, 0.5))
+            }
+            SimStatus::Failed(error) => {
+                let short_error = if error.len() > 30 {
+                    format!("{}...", &error[..30])
+                } else {
+                    error.clone()
+                };
+                (format!("Sim: FAILED - {}", short_error), Color::srgb(0.9, 0.4, 0.4))
+            }
+        };
+
+        text.sections[0].value = status_text;
+        text.sections[0].style.color = color;
     }
 }
 

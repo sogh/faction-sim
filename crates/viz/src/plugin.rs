@@ -6,7 +6,9 @@ use crate::agents::AgentPlugin;
 use crate::camera::CameraPlugin;
 use crate::debug::DebugPlugin;
 use crate::director_state::DirectorPlugin;
+use crate::intervention::InterventionPlugin;
 use crate::overlay::OverlayPlugin;
+use crate::sim_runner::SimRunnerPlugin;
 use crate::state_loader::StateLoaderPlugin;
 use crate::world::WorldPlugin;
 
@@ -31,11 +33,13 @@ impl Plugin for SimVizPlugin {
                 .set(ImagePlugin::default_nearest()), // Pixel-perfect rendering
         )
         .add_plugins((
+            SimRunnerPlugin,
             CameraPlugin,
             StateLoaderPlugin,
             WorldPlugin,
             AgentPlugin,
             DirectorPlugin,
+            InterventionPlugin,
             OverlayPlugin,
             DebugPlugin,
         ));

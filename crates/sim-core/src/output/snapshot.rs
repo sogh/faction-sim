@@ -359,6 +359,179 @@ pub fn write_current_state(snapshot: &WorldSnapshot) -> std::io::Result<()> {
     write_snapshot(snapshot, "output/current_state.json")
 }
 
+/// Load a snapshot from file
+pub fn load_snapshot(path: impl AsRef<Path>) -> std::io::Result<WorldSnapshot> {
+    let json = fs::read_to_string(path)?;
+    let snapshot: WorldSnapshot = serde_json::from_str(&json)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    Ok(snapshot)
+}
+
+/// Restore world state from a snapshot.
+///
+/// This function restores:
+/// - Agent positions, traits, needs, goals
+/// - Faction resources and membership
+/// - Relationships and trust
+/// - World state (tick, season)
+///
+/// Returns the tick number from the snapshot.
+pub fn restore_from_snapshot(world: &mut World, snapshot: &WorldSnapshot) -> u64 {
+    use crate::components::agent::{AgentId, Alive, Goals, Goal, GoalType, Needs, FoodSecurity, SocialBelonging, Traits, Role};
+    use crate::components::faction::{FactionMembership, FactionRegistry};
+    use crate::components::social::{RelationshipGraph, Relationship, Trust};
+    use crate::components::world::{Position, WorldState, Season};
+
+    let tick = snapshot.timestamp.tick;
+
+    // Update world state
+    {
+        let mut world_state = world.resource_mut::<WorldState>();
+        world_state.set_tick(tick);
+        // Parse season from snapshot
+        let season = match snapshot.world.season.as_str() {
+            "spring" => Season::Spring,
+            "summer" => Season::Summer,
+            "autumn" => Season::Autumn,
+            "winter" => Season::Winter,
+            _ => Season::Spring,
+        };
+        world_state.current_season = season;
+    }
+
+    // Update faction resources
+    {
+        let mut faction_registry = world.resource_mut::<FactionRegistry>();
+        for faction_snap in &snapshot.factions {
+            if let Some(faction) = faction_registry.get_mut(&faction_snap.faction_id) {
+                faction.resources.grain = faction_snap.resources.grain;
+                faction.resources.iron = faction_snap.resources.iron;
+                faction.resources.salt = faction_snap.resources.salt;
+                faction.resources.beer = faction_snap.resources.beer;
+                faction.member_count = faction_snap.member_count;
+                faction.leader = faction_snap.leader.clone();
+                faction.reader = faction_snap.reader.clone();
+            }
+        }
+    }
+
+    // Build agent ID to entity mapping
+    let mut agent_entities: HashMap<String, Entity> = HashMap::new();
+    {
+        let mut query = world.query::<(Entity, &AgentId)>();
+        for (entity, agent_id) in query.iter(world) {
+            agent_entities.insert(agent_id.0.clone(), entity);
+        }
+    }
+
+    // Update agents from snapshot
+    for agent_snap in &snapshot.agents {
+        if let Some(&entity) = agent_entities.get(&agent_snap.agent_id) {
+            // Update position
+            if let Some(mut position) = world.get_mut::<Position>(entity) {
+                position.location_id = agent_snap.location.clone();
+            }
+
+            // Update alive status
+            if let Some(mut alive) = world.get_mut::<Alive>(entity) {
+                alive.0 = agent_snap.alive;
+            }
+
+            // Update traits
+            if let Some(mut traits) = world.get_mut::<Traits>(entity) {
+                traits.boldness = agent_snap.traits.boldness;
+                traits.loyalty_weight = agent_snap.traits.loyalty_weight;
+                traits.grudge_persistence = agent_snap.traits.grudge_persistence;
+                traits.ambition = agent_snap.traits.ambition;
+                traits.honesty = agent_snap.traits.honesty;
+                traits.sociability = agent_snap.traits.sociability;
+                traits.group_preference = agent_snap.traits.group_preference;
+            }
+
+            // Update needs
+            if let Some(mut needs) = world.get_mut::<Needs>(entity) {
+                needs.food_security = match agent_snap.needs.food_security.as_str() {
+                    "secure" => FoodSecurity::Secure,
+                    "stressed" => FoodSecurity::Stressed,
+                    "desperate" => FoodSecurity::Desperate,
+                    _ => FoodSecurity::Secure,
+                };
+                needs.social_belonging = match agent_snap.needs.social_belonging.as_str() {
+                    "integrated" => SocialBelonging::Integrated,
+                    "peripheral" => SocialBelonging::Peripheral,
+                    "isolated" => SocialBelonging::Isolated,
+                    _ => SocialBelonging::Integrated,
+                };
+            }
+
+            // Update faction membership
+            if let Some(mut membership) = world.get_mut::<FactionMembership>(entity) {
+                membership.faction_id = agent_snap.faction.clone();
+                membership.status_level = agent_snap.status.level;
+                membership.role = match agent_snap.role.as_str() {
+                    "leader" => Role::Leader,
+                    "reader" => Role::Reader,
+                    "councilmember" | "council_member" => Role::CouncilMember,
+                    "scoutcaptain" | "scout_captain" => Role::ScoutCaptain,
+                    "healer" => Role::Healer,
+                    "smith" => Role::Smith,
+                    "skilledworker" | "skilled_worker" => Role::SkilledWorker,
+                    "laborer" => Role::Laborer,
+                    "newcomer" => Role::Newcomer,
+                    _ => Role::Laborer,
+                };
+            }
+
+            // Update goals
+            if let Some(mut goals) = world.get_mut::<Goals>(entity) {
+                goals.goals.clear();
+                for goal_snap in &agent_snap.goals {
+                    let goal_type = match goal_snap.goal.as_str() {
+                        "survive" => GoalType::Survive,
+                        "survivewinter" => GoalType::SurviveWinter,
+                        "revenge" => GoalType::Revenge,
+                        "riseinstatus" => GoalType::RiseInStatus,
+                        "protect" => GoalType::Protect,
+                        "accumulateresources" => GoalType::AccumulateResources,
+                        "buildrelationship" => GoalType::BuildRelationship,
+                        "defect" => GoalType::Defect,
+                        "supportleader" => GoalType::SupportLeader,
+                        "challengeleader" => GoalType::ChallengeLeader,
+                        _ => GoalType::Survive,
+                    };
+                    let mut goal = Goal::new(goal_type, goal_snap.priority);
+                    if let Some(ref target) = goal_snap.target {
+                        goal = goal.with_target(target);
+                    }
+                    goals.goals.push(goal);
+                }
+            }
+        }
+    }
+
+    // Update relationships
+    {
+        let mut relationship_graph = world.resource_mut::<RelationshipGraph>();
+        for (agent_id, relationships) in &snapshot.relationships {
+            for (target_id, rel_snap) in relationships {
+                let relationship = Relationship {
+                    target_id: target_id.clone(),
+                    trust: Trust {
+                        reliability: rel_snap.reliability,
+                        alignment: rel_snap.alignment,
+                        capability: rel_snap.capability,
+                    },
+                    last_interaction_tick: rel_snap.last_interaction_tick,
+                    memory_count: rel_snap.memory_count,
+                };
+                relationship_graph.set(agent_id, relationship);
+            }
+        }
+    }
+
+    tick
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
