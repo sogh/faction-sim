@@ -1,6 +1,8 @@
 //! State loading and file watching.
 //!
 //! Watches simulation output files and triggers updates when they change.
+//! Also handles playback control - advancing through snapshots based on
+//! PlaybackState settings.
 
 use bevy::prelude::*;
 use notify::{Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher};
@@ -9,14 +11,27 @@ use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Instant;
 
+use crate::overlay::PlaybackState;
+
 /// Plugin for loading simulation state from files.
 pub struct StateLoaderPlugin;
 
 impl Plugin for StateLoaderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SimulationState>()
+            .init_resource::<SnapshotCache>()
             .add_event::<StateUpdatedEvent>()
-            .add_systems(Update, (check_file_updates, handle_reload_key));
+            .add_systems(
+                Update,
+                (
+                    check_file_updates,
+                    scan_available_snapshots,
+                    advance_playback,
+                    load_snapshot_for_playback,
+                    handle_reload_key,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -256,6 +271,140 @@ fn load_state_file(path: &PathBuf, state: &mut SimulationState) -> bool {
             state.last_error = Some(error_msg);
             false
         }
+    }
+}
+
+/// Cache of available snapshot files and their ticks.
+#[derive(Resource, Default)]
+pub struct SnapshotCache {
+    /// Available snapshot ticks (sorted).
+    pub available_ticks: Vec<u64>,
+    /// Last time we scanned for snapshots.
+    last_scan: Option<Instant>,
+    /// Currently loaded tick.
+    loaded_tick: Option<u64>,
+}
+
+impl SnapshotCache {
+    /// Find the nearest snapshot tick at or before the target tick.
+    pub fn find_snapshot_tick(&self, target_tick: u64) -> Option<u64> {
+        // Binary search for the largest tick <= target_tick
+        match self.available_ticks.binary_search(&target_tick) {
+            Ok(idx) => Some(self.available_ticks[idx]),
+            Err(idx) => {
+                if idx > 0 {
+                    Some(self.available_ticks[idx - 1])
+                } else {
+                    self.available_ticks.first().copied()
+                }
+            }
+        }
+    }
+}
+
+/// System to scan for available snapshot files periodically.
+fn scan_available_snapshots(
+    mut cache: ResMut<SnapshotCache>,
+    mut playback: ResMut<PlaybackState>,
+) {
+    // Only scan every 500ms to avoid excessive disk access
+    let should_scan = cache
+        .last_scan
+        .map(|t| t.elapsed().as_millis() > 500)
+        .unwrap_or(true);
+
+    if !should_scan {
+        return;
+    }
+
+    cache.last_scan = Some(Instant::now());
+
+    let snapshots_dir = PathBuf::from("output/snapshots");
+    if !snapshots_dir.exists() {
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(&snapshots_dir) else {
+        return;
+    };
+
+    let mut ticks: Vec<u64> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "json") {
+                // Parse tick from filename like "snap_000500.json"
+                let stem = path.file_stem()?.to_str()?;
+                let tick_str = stem.strip_prefix("snap_")?;
+                tick_str.parse().ok()
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    ticks.sort_unstable();
+
+    // Update max available tick
+    if let Some(&max_tick) = ticks.last() {
+        playback.max_available_tick = max_tick;
+    }
+
+    cache.available_ticks = ticks;
+}
+
+/// System to advance playback tick based on time and speed.
+fn advance_playback(time: Res<Time>, mut playback: ResMut<PlaybackState>) {
+    if !playback.playing {
+        return;
+    }
+
+    if playback.max_available_tick == 0 {
+        return;
+    }
+
+    // Advance by speed * delta_time (speed is ticks per second)
+    // Base rate: 60 ticks per second at 1x speed
+    let ticks_per_second = 60.0 * playback.speed as f64;
+    let delta_ticks = ticks_per_second * time.delta_seconds_f64();
+
+    playback.current_tick += delta_ticks;
+
+    // Clamp to available range
+    if playback.current_tick > playback.max_available_tick as f64 {
+        playback.current_tick = playback.max_available_tick as f64;
+        // Auto-pause at end
+        playback.playing = false;
+    }
+}
+
+/// System to load the appropriate snapshot for the current playback tick.
+fn load_snapshot_for_playback(
+    cache: Res<SnapshotCache>,
+    playback: Res<PlaybackState>,
+    mut state: ResMut<SimulationState>,
+    mut snapshot_cache: ResMut<SnapshotCache>,
+    mut events: EventWriter<StateUpdatedEvent>,
+) {
+    let target_tick = playback.tick_for_snapshot();
+
+    // Find the best snapshot for this tick
+    let Some(snapshot_tick) = cache.find_snapshot_tick(target_tick) else {
+        return;
+    };
+
+    // Skip if we already have this snapshot loaded
+    if snapshot_cache.loaded_tick == Some(snapshot_tick) {
+        return;
+    }
+
+    // Load the snapshot
+    let path = PathBuf::from(format!("output/snapshots/snap_{:06}.json", snapshot_tick));
+    if load_state_file(&path, &mut state) {
+        snapshot_cache.loaded_tick = Some(snapshot_tick);
+        events.send(StateUpdatedEvent {
+            tick: state.current_tick(),
+        });
     }
 }
 

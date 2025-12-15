@@ -7,6 +7,7 @@
 pub mod agents;
 pub mod camera;
 pub mod debug;
+pub mod director_runner;
 pub mod director_state;
 pub mod intervention;
 pub mod overlay;

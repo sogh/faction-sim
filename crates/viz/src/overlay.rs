@@ -34,8 +34,12 @@ impl Plugin for OverlayPlugin {
 pub struct PlaybackState {
     /// Whether playback is running.
     pub playing: bool,
-    /// Playback speed multiplier.
+    /// Playback speed multiplier (ticks per second).
     pub speed: f32,
+    /// Current playback tick (fractional for smooth interpolation).
+    pub current_tick: f64,
+    /// Maximum tick available from snapshots.
+    pub max_available_tick: u64,
 }
 
 impl Default for PlaybackState {
@@ -43,7 +47,16 @@ impl Default for PlaybackState {
         Self {
             playing: true,
             speed: 1.0,
+            current_tick: 0.0,
+            max_available_tick: 0,
         }
+    }
+}
+
+impl PlaybackState {
+    /// Get the current tick as an integer for snapshot selection.
+    pub fn tick_for_snapshot(&self) -> u64 {
+        self.current_tick as u64
     }
 }
 
@@ -356,21 +369,28 @@ fn update_status_bar(
     state: Res<SimulationState>,
     camera: Res<CameraController>,
     director: Res<DirectorState>,
+    playback: Res<PlaybackState>,
     mut tick_query: Query<&mut Text, (With<TickDisplay>, Without<CameraModeDisplay>)>,
     mut mode_query: Query<&mut Text, (With<CameraModeDisplay>, Without<TickDisplay>)>,
 ) {
-    // Update tick display
+    // Update tick display - shows playback position and loaded snapshot info
     for mut text in tick_query.iter_mut() {
         if let Some(ref snapshot) = state.snapshot {
+            let playback_tick = playback.tick_for_snapshot();
+            let max_tick = playback.max_available_tick;
+            let play_status = if playback.playing { "▶" } else { "⏸" };
+
             text.sections[0].value = format!(
-                "Tick: {} | Year {}, {}, Day {}",
-                snapshot.timestamp.tick,
+                "{} Tick {}/{} | Year {}, {}, Day {}",
+                play_status,
+                playback_tick,
+                max_tick,
                 snapshot.timestamp.date.year,
                 snapshot.timestamp.date.season,
                 snapshot.timestamp.date.day,
             );
         } else {
-            text.sections[0].value = "No simulation data".to_string();
+            text.sections[0].value = "Viewing: No data yet".to_string();
         }
     }
 
@@ -396,17 +416,17 @@ fn update_sim_status_display(
 ) {
     for mut text in status_query.iter_mut() {
         let (status_text, color) = match &sim_runner.status {
-            SimStatus::Idle => ("Sim: Idle | [S] Start".to_string(), Color::srgb(0.6, 0.6, 0.6)),
-            SimStatus::Starting => ("Sim: Starting...".to_string(), Color::srgb(0.8, 0.8, 0.5)),
+            SimStatus::Idle => ("Simulated: None | [S] Start".to_string(), Color::srgb(0.6, 0.6, 0.6)),
+            SimStatus::Starting => ("Simulating...".to_string(), Color::srgb(0.8, 0.8, 0.5)),
             SimStatus::Running { current_tick, max_ticks } => {
                 let percent = (*current_tick as f32 / *max_ticks as f32 * 100.0) as u32;
                 (
-                    format!("Sim: {}/{} ({}%)", current_tick, max_ticks, percent),
+                    format!("Simulated: {}/{} ticks ({}%)", current_tick, max_ticks, percent),
                     Color::srgb(0.5, 0.8, 0.5),
                 )
             }
             SimStatus::Completed { final_tick } => {
-                (format!("Sim: Complete ({})", final_tick), Color::srgb(0.5, 0.8, 0.5))
+                (format!("Simulated: {} ticks (done)", final_tick), Color::srgb(0.5, 0.8, 0.5))
             }
             SimStatus::Failed(error) => {
                 let short_error = if error.len() > 30 {
@@ -414,7 +434,7 @@ fn update_sim_status_display(
                 } else {
                     error.clone()
                 };
-                (format!("Sim: FAILED - {}", short_error), Color::srgb(0.9, 0.4, 0.4))
+                (format!("Sim FAILED: {}", short_error), Color::srgb(0.9, 0.4, 0.4))
             }
         };
 

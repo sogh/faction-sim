@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use crate::agents::AgentPlugin;
 use crate::camera::CameraPlugin;
 use crate::debug::DebugPlugin;
+use crate::director_runner::DirectorRunnerPlugin;
 use crate::director_state::DirectorPlugin;
 use crate::intervention::InterventionPlugin;
 use crate::overlay::OverlayPlugin;
@@ -39,6 +40,7 @@ impl Plugin for SimVizPlugin {
             WorldPlugin,
             AgentPlugin,
             DirectorPlugin,
+            DirectorRunnerPlugin,
             InterventionPlugin,
             OverlayPlugin,
             DebugPlugin,
