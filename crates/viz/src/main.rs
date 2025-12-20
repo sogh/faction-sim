@@ -40,6 +40,10 @@ struct Args {
     /// Output directory for simulation files
     #[arg(long, default_value = "output")]
     output_dir: PathBuf,
+
+    /// Maximum ticks ahead of playback the simulation can run
+    #[arg(long, default_value_t = 300)]
+    max_ticks_ahead: u64,
 }
 
 fn main() {
@@ -54,6 +58,7 @@ fn main() {
         output_dir: args.output_dir,
         from_snapshot: None,
         start_tick: None,
+        max_ticks_ahead: args.max_ticks_ahead,
     };
 
     App::new()

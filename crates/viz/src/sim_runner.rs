@@ -10,6 +10,8 @@ use std::io::{BufRead, BufReader};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Mutex;
 
+use crate::overlay::PlaybackState;
+
 /// Plugin for managing simulation subprocess.
 pub struct SimRunnerPlugin;
 
@@ -27,6 +29,7 @@ impl Plugin for SimRunnerPlugin {
                 Update,
                 (
                     poll_simulation,
+                    enforce_tick_limit,
                     handle_sim_control_input,
                 ),
             );
@@ -50,6 +53,9 @@ pub struct SimConfig {
     pub output_dir: PathBuf,
     /// Whether to auto-start simulation on launch.
     pub auto_start: bool,
+    /// Maximum ticks ahead of playback the simulation can run.
+    /// When exceeded, simulation pauses until playback catches up.
+    pub max_ticks_ahead: u64,
 }
 
 impl Default for SimConfig {
@@ -62,6 +68,7 @@ impl Default for SimConfig {
             start_tick: None,
             output_dir: PathBuf::from("output"),
             auto_start: false,
+            max_ticks_ahead: 300,
         }
     }
 }
@@ -76,6 +83,11 @@ pub enum SimStatus {
     /// Simulation actively running.
     Running {
         current_tick: u64,
+        max_ticks: u64,
+    },
+    /// Simulation paused because it's too far ahead of playback.
+    PausedAhead {
+        paused_at_tick: u64,
         max_ticks: u64,
     },
     /// Simulation completed successfully.
@@ -137,11 +149,18 @@ impl Default for SimRunner {
 impl SimRunner {
     /// Start a new simulation with the given config.
     pub fn start(&mut self, config: &SimConfig) -> Result<(), String> {
+        self.start_internal(config, true)
+    }
+
+    /// Start simulation, optionally clearing output files.
+    fn start_internal(&mut self, config: &SimConfig, clear_output: bool) -> Result<(), String> {
         // Stop any existing simulation first
         self.stop();
 
-        // Clear old output files to avoid stale data
-        Self::clear_output_directory(&config.output_dir);
+        // Clear old output files to avoid stale data (skip when resuming)
+        if clear_output {
+            Self::clear_output_directory(&config.output_dir);
+        }
 
         let mut cmd = Command::new("cargo");
         cmd.arg("run")
@@ -444,6 +463,68 @@ fn handle_sim_control_input(
     }
 }
 
+/// System to enforce the tick limit, pausing simulation when too far ahead.
+fn enforce_tick_limit(
+    mut sim_runner: ResMut<SimRunner>,
+    playback: Res<PlaybackState>,
+    config: Res<SimConfig>,
+    mut events: EventWriter<SimulationEvent>,
+) {
+    let playback_tick = playback.tick_for_snapshot();
+    let sim_tick = sim_runner.last_tick_seen;
+
+    // Check if we should pause because we're too far ahead
+    if let SimStatus::Running { current_tick, max_ticks } = sim_runner.status.clone() {
+        if sim_tick > playback_tick + config.max_ticks_ahead {
+            tracing::info!(
+                "Simulation paused: {} ticks ahead of playback (limit: {})",
+                sim_tick.saturating_sub(playback_tick),
+                config.max_ticks_ahead
+            );
+            sim_runner.stop();
+            sim_runner.status = SimStatus::PausedAhead {
+                paused_at_tick: current_tick,
+                max_ticks,
+            };
+        }
+    }
+
+    // Check if we should resume because playback has caught up
+    // Resume when we're within half the limit (to avoid thrashing)
+    if let SimStatus::PausedAhead { paused_at_tick, max_ticks } = sim_runner.status.clone() {
+        let resume_threshold = config.max_ticks_ahead / 2;
+        // Use paused_at_tick (not last_tick_seen which gets reset to 0 on stop)
+        if paused_at_tick <= playback_tick + resume_threshold {
+            tracing::info!(
+                "Resuming simulation: playback caught up (playback {} / paused at {})",
+                playback_tick,
+                paused_at_tick
+            );
+
+            // Resume from the paused tick by finding the nearest snapshot
+            if let Some(snapshot_path) = find_snapshot_at_or_before(&config.output_dir, paused_at_tick) {
+                let resume_config = SimConfig {
+                    from_snapshot: Some(snapshot_path),
+                    start_tick: Some(paused_at_tick),
+                    ticks: max_ticks.saturating_sub(paused_at_tick),
+                    ..config.clone()
+                };
+
+                // Don't clear output files when resuming - we need the existing snapshots
+                if let Err(e) = sim_runner.start_internal(&resume_config, false) {
+                    tracing::error!("Failed to resume simulation: {}", e);
+                    events.send(SimulationEvent::Failed { error: e });
+                } else {
+                    tracing::info!("Simulation resumed from tick {}", paused_at_tick);
+                }
+            } else {
+                tracing::warn!("Could not find snapshot to resume from at tick {}", paused_at_tick);
+                sim_runner.status = SimStatus::Idle;
+            }
+        }
+    }
+}
+
 /// Find the nearest snapshot file at or before the given tick.
 pub fn find_snapshot_at_or_before(output_dir: &PathBuf, tick: u64) -> Option<PathBuf> {
     let snapshots_dir = output_dir.join("snapshots");
@@ -517,6 +598,7 @@ mod tests {
         assert_eq!(config.snapshot_interval, 50);
         assert_eq!(config.seed, 42);
         assert!(!config.auto_start);
+        assert_eq!(config.max_ticks_ahead, 300);
     }
 
     #[test]

@@ -3,10 +3,12 @@
 use bevy::prelude::*;
 use std::collections::VecDeque;
 
+use crate::agents::{AgentSelectedEvent, VisualAgent};
 use crate::camera::CameraController;
 use crate::director_state::DirectorState;
 use crate::sim_runner::{SimRunner, SimStatus};
 use crate::state_loader::SimulationState;
+use crate::world::LocationPositions;
 
 /// Plugin for UI overlay rendering.
 pub struct OverlayPlugin;
@@ -14,6 +16,7 @@ pub struct OverlayPlugin;
 impl Plugin for OverlayPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PlaybackState>()
+            .init_resource::<SelectedAgentInfo>()
             .add_systems(Startup, setup_overlay_ui)
             .add_systems(
                 Update,
@@ -24,6 +27,8 @@ impl Plugin for OverlayPlugin {
                     fade_commentary,
                     update_playback_controls,
                     handle_playback_input,
+                    update_agent_selection_info,
+                    update_agent_info_panel,
                 ),
             );
     }
@@ -107,6 +112,31 @@ pub struct PlayPauseButton;
 #[derive(Component)]
 pub struct SpeedButton(pub f32);
 
+/// Resource tracking selected agent info.
+#[derive(Resource, Default)]
+pub struct SelectedAgentInfo {
+    /// The currently selected agent ID.
+    pub agent_id: Option<String>,
+    /// Agent's display name.
+    pub name: Option<String>,
+    /// Agent's faction.
+    pub faction: Option<String>,
+    /// Agent's role.
+    pub role: Option<String>,
+    /// Agent's current location ID.
+    pub location: Option<String>,
+    /// Agent's world position.
+    pub position: Option<Vec2>,
+}
+
+/// Component marking the agent info panel container.
+#[derive(Component)]
+pub struct AgentInfoPanel;
+
+/// Component marking the agent info text.
+#[derive(Component)]
+pub struct AgentInfoText;
+
 /// System to set up the overlay UI structure.
 fn setup_overlay_ui(mut commands: Commands) {
     // Root UI node covering the entire screen
@@ -141,7 +171,70 @@ fn setup_overlay_ui(mut commands: Commands) {
             spawn_bottom_area(parent);
         });
 
+    // Agent info panel (floating, top-right)
+    spawn_agent_info_panel(&mut commands);
+
     tracing::info!("Overlay UI initialized");
+}
+
+/// Spawn the agent info panel (floating panel on the right side).
+fn spawn_agent_info_panel(commands: &mut Commands) {
+    commands
+        .spawn((
+            NodeBundle {
+                style: Style {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(50.0),
+                    right: Val::Px(10.0),
+                    width: Val::Px(250.0),
+                    padding: UiRect::all(Val::Px(12.0)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                    ..default()
+                },
+                background_color: Color::srgba(0.0, 0.0, 0.0, 0.85).into(),
+                visibility: Visibility::Hidden,
+                z_index: ZIndex::Global(50),
+                ..default()
+            },
+            AgentInfoPanel,
+        ))
+        .with_children(|parent| {
+            // Panel title
+            parent.spawn(TextBundle::from_section(
+                "Selected Agent",
+                TextStyle {
+                    font_size: 16.0,
+                    color: Color::srgb(0.9, 0.8, 0.6),
+                    ..default()
+                },
+            ));
+
+            // Separator line
+            parent.spawn(NodeBundle {
+                style: Style {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(1.0),
+                    margin: UiRect::vertical(Val::Px(4.0)),
+                    ..default()
+                },
+                background_color: Color::srgb(0.4, 0.4, 0.4).into(),
+                ..default()
+            });
+
+            // Agent info text (will be updated dynamically)
+            parent.spawn((
+                TextBundle::from_section(
+                    "",
+                    TextStyle {
+                        font_size: 14.0,
+                        color: Color::WHITE,
+                        ..default()
+                    },
+                ),
+                AgentInfoText,
+            ));
+        });
 }
 
 /// Spawn the top status bar.
@@ -425,6 +518,12 @@ fn update_sim_status_display(
                     Color::srgb(0.5, 0.8, 0.5),
                 )
             }
+            SimStatus::PausedAhead { paused_at_tick, max_ticks } => {
+                (
+                    format!("Simulated: {}/{} (paused - ahead of playback)", paused_at_tick, max_ticks),
+                    Color::srgb(0.8, 0.7, 0.4),
+                )
+            }
             SimStatus::Completed { final_tick } => {
                 (format!("Simulated: {} ticks (done)", final_tick), Color::srgb(0.5, 0.8, 0.5))
             }
@@ -605,6 +704,98 @@ fn handle_playback_input(
             playback.speed = speed_button.0;
         }
     }
+}
+
+/// System to update selected agent info when selection changes.
+fn update_agent_selection_info(
+    mut events: EventReader<AgentSelectedEvent>,
+    mut selected_info: ResMut<SelectedAgentInfo>,
+    state: Res<SimulationState>,
+    agents: Query<(&Transform, &VisualAgent)>,
+    location_positions: Res<LocationPositions>,
+) {
+    for event in events.read() {
+        match &event.agent_id {
+            Some(agent_id) => {
+                // Find the agent in the snapshot
+                if let Some(ref snapshot) = state.snapshot {
+                    if let Some(agent_snap) = snapshot.agents.iter().find(|a| &a.agent_id == agent_id) {
+                        // Get position from visual agent if available
+                        let position = agents
+                            .iter()
+                            .find(|(_, va)| &va.agent_id == agent_id)
+                            .map(|(t, _)| t.translation.truncate())
+                            .or_else(|| Some(location_positions.get(&agent_snap.location)));
+
+                        selected_info.agent_id = Some(agent_id.clone());
+                        selected_info.name = Some(agent_snap.name.clone());
+                        selected_info.faction = Some(agent_snap.faction.clone());
+                        selected_info.role = Some(agent_snap.role.clone());
+                        selected_info.location = Some(agent_snap.location.clone());
+                        selected_info.position = position;
+                    }
+                }
+            }
+            None => {
+                // Clear selection
+                *selected_info = SelectedAgentInfo::default();
+            }
+        }
+    }
+}
+
+/// System to update the agent info panel display.
+fn update_agent_info_panel(
+    selected_info: Res<SelectedAgentInfo>,
+    mut panel_query: Query<&mut Visibility, With<AgentInfoPanel>>,
+    mut text_query: Query<&mut Text, With<AgentInfoText>>,
+) {
+    let Ok(mut panel_visibility) = panel_query.get_single_mut() else {
+        return;
+    };
+
+    if selected_info.agent_id.is_some() {
+        *panel_visibility = Visibility::Visible;
+
+        // Update text content
+        if let Ok(mut text) = text_query.get_single_mut() {
+            let name = selected_info.name.as_deref().unwrap_or("Unknown");
+            let agent_id = selected_info.agent_id.as_deref().unwrap_or("???");
+            let faction = selected_info.faction.as_deref().unwrap_or("None");
+            let role = selected_info.role.as_deref().unwrap_or("Unknown");
+            let location = selected_info
+                .location
+                .as_ref()
+                .map(|l| format_location_name(l))
+                .unwrap_or_else(|| "Unknown".to_string());
+            let coords = selected_info
+                .position
+                .map(|p| format!("({:.0}, {:.0})", p.x, p.y))
+                .unwrap_or_else(|| "?".to_string());
+
+            text.sections[0].value = format!(
+                "Name: {}\nID: {}\nFaction: {}\nRole: {}\nLocation: {}\nCoords: {}",
+                name, agent_id, faction, role, location, coords
+            );
+        }
+    } else {
+        *panel_visibility = Visibility::Hidden;
+    }
+}
+
+/// Format a location ID into a human-readable display name.
+fn format_location_name(location_id: &str) -> String {
+    location_id
+        .split('_')
+        .map(|word| {
+            let mut chars: Vec<char> = word.chars().collect();
+            if let Some(first) = chars.first_mut() {
+                *first = first.to_ascii_uppercase();
+            }
+            chars.into_iter().collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]

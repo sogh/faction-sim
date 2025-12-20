@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::camera::CameraController;
+use crate::camera::{CameraController, MainCamera};
 use crate::state_loader::{SimulationState, StateUpdatedEvent};
 
 /// Plugin for world/map rendering.
@@ -14,10 +14,15 @@ impl Plugin for WorldPlugin {
         app.init_resource::<VisualWorld>()
             .init_resource::<FactionColors>()
             .init_resource::<LocationPositions>()
-            .add_systems(Startup, spawn_map_background)
+            .init_resource::<HoverTooltip>()
+            .add_systems(Startup, (spawn_map_background, spawn_tooltip_ui))
             .add_systems(
                 Update,
                 (update_locations, update_location_labels).run_if(on_event::<StateUpdatedEvent>()),
+            )
+            .add_systems(
+                Update,
+                (handle_location_hover, update_tooltip_display),
             );
     }
 }
@@ -250,6 +255,29 @@ pub struct LocationLabel {
     pub location_id: String,
 }
 
+/// Marker component for hovered locations.
+#[derive(Component)]
+pub struct HoveredLocation;
+
+/// Resource tracking hover tooltip state.
+#[derive(Resource, Default)]
+pub struct HoverTooltip {
+    /// The currently hovered location ID.
+    pub hovered_location: Option<String>,
+    /// World position of the hovered item.
+    pub world_position: Vec2,
+    /// Screen position for the tooltip.
+    pub screen_position: Vec2,
+}
+
+/// Marker component for the tooltip UI container.
+#[derive(Component)]
+pub struct TooltipContainer;
+
+/// Marker component for the tooltip text.
+#[derive(Component)]
+pub struct TooltipText;
+
 /// Marker component for the map background.
 #[derive(Component)]
 pub struct MapBackground;
@@ -323,26 +351,49 @@ fn update_locations(
 
         let size = location_type.base_size();
 
-        // Spawn the location marker
-        commands.spawn((
-            SpriteBundle {
-                sprite: Sprite {
-                    color,
-                    custom_size: Some(size),
+        // Spawn the location marker with a text label as child
+        commands
+            .spawn((
+                SpriteBundle {
+                    sprite: Sprite {
+                        color,
+                        custom_size: Some(size),
+                        ..default()
+                    },
+                    transform: Transform::from_xyz(position.x, position.y, 0.0),
                     ..default()
                 },
-                transform: Transform::from_xyz(position.x, position.y, 0.0),
-                ..default()
-            },
-            VisualLocation {
-                location_id: location.location_id.clone(),
-                location_type: location_type.clone(),
-                controlling_faction: location.controlling_faction.clone(),
-            },
-            LocationMarker {
-                location_id: location.location_id.clone(),
-            },
-        ));
+                VisualLocation {
+                    location_id: location.location_id.clone(),
+                    location_type: location_type.clone(),
+                    controlling_faction: location.controlling_faction.clone(),
+                },
+                LocationMarker {
+                    location_id: location.location_id.clone(),
+                },
+            ))
+            .with_children(|parent| {
+                // Spawn text label below the location
+                let display_name = format_location_name(&location.location_id);
+                parent.spawn((
+                    Text2dBundle {
+                        text: Text::from_section(
+                            display_name,
+                            TextStyle {
+                                font_size: 14.0,
+                                color: Color::WHITE,
+                                ..default()
+                            },
+                        )
+                        .with_justify(JustifyText::Center),
+                        transform: Transform::from_xyz(0.0, -size.y / 2.0 - 12.0, 0.1),
+                        ..default()
+                    },
+                    LocationLabel {
+                        location_id: location.location_id.clone(),
+                    },
+                ));
+            });
     }
 }
 
@@ -363,6 +414,21 @@ fn parse_location_type(location_id: &str) -> LocationType {
     }
 }
 
+/// Format a location ID into a human-readable display name.
+fn format_location_name(location_id: &str) -> String {
+    location_id
+        .split('_')
+        .map(|word| {
+            let mut chars: Vec<char> = word.chars().collect();
+            if let Some(first) = chars.first_mut() {
+                *first = first.to_ascii_uppercase();
+            }
+            chars.into_iter().collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// System to update location label visibility based on zoom.
 fn update_location_labels(
     camera: Res<CameraController>,
@@ -379,9 +445,142 @@ fn update_location_labels(
     }
 }
 
+/// System to spawn the tooltip UI.
+fn spawn_tooltip_ui(mut commands: Commands) {
+    commands
+        .spawn((
+            NodeBundle {
+                style: Style {
+                    position_type: PositionType::Absolute,
+                    padding: UiRect::all(Val::Px(8.0)),
+                    ..default()
+                },
+                background_color: Color::srgba(0.0, 0.0, 0.0, 0.85).into(),
+                visibility: Visibility::Hidden,
+                z_index: ZIndex::Global(100),
+                ..default()
+            },
+            TooltipContainer,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                TextBundle::from_section(
+                    "",
+                    TextStyle {
+                        font_size: 14.0,
+                        color: Color::WHITE,
+                        ..default()
+                    },
+                ),
+                TooltipText,
+            ));
+        });
+}
+
+/// System to handle hovering over locations.
+fn handle_location_hover(
+    mut commands: Commands,
+    windows: Query<&Window>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    locations: Query<(Entity, &Transform, &VisualLocation)>,
+    hovered: Query<Entity, With<HoveredLocation>>,
+    mut tooltip: ResMut<HoverTooltip>,
+    location_positions: Res<LocationPositions>,
+) {
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
+
+    let Some(cursor_pos) = window.cursor_position() else {
+        // Clear hover if no cursor
+        for entity in hovered.iter() {
+            commands.entity(entity).remove::<HoveredLocation>();
+        }
+        tooltip.hovered_location = None;
+        return;
+    };
+
+    let Ok((camera, camera_transform)) = camera_query.get_single() else {
+        return;
+    };
+
+    let Some(world_pos) = camera.viewport_to_world_2d(camera_transform, cursor_pos) else {
+        return;
+    };
+
+    // Clear previous hover
+    for entity in hovered.iter() {
+        commands.entity(entity).remove::<HoveredLocation>();
+    }
+
+    // Find location under cursor
+    let hover_radius = 30.0;
+    let mut closest: Option<(Entity, &VisualLocation, f32)> = None;
+
+    for (entity, transform, visual_loc) in locations.iter() {
+        let loc_pos = transform.translation.truncate();
+        let distance = world_pos.distance(loc_pos);
+
+        if distance < hover_radius {
+            if closest.is_none() || distance < closest.as_ref().unwrap().2 {
+                closest = Some((entity, visual_loc, distance));
+            }
+        }
+    }
+
+    if let Some((entity, visual_loc, _)) = closest {
+        commands.entity(entity).insert(HoveredLocation);
+        let loc_world_pos = location_positions.get(&visual_loc.location_id);
+        tooltip.hovered_location = Some(visual_loc.location_id.clone());
+        tooltip.world_position = loc_world_pos;
+        tooltip.screen_position = cursor_pos;
+    } else {
+        tooltip.hovered_location = None;
+    }
+}
+
+/// System to update the tooltip display.
+fn update_tooltip_display(
+    tooltip: Res<HoverTooltip>,
+    mut container_query: Query<(&mut Style, &mut Visibility), With<TooltipContainer>>,
+    mut text_query: Query<&mut Text, With<TooltipText>>,
+) {
+    let Ok((mut style, mut visibility)) = container_query.get_single_mut() else {
+        return;
+    };
+
+    if let Some(ref location_id) = tooltip.hovered_location {
+        *visibility = Visibility::Visible;
+
+        // Position tooltip near cursor (offset slightly so it doesn't cover what we're pointing at)
+        style.left = Val::Px(tooltip.screen_position.x + 15.0);
+        style.top = Val::Px(tooltip.screen_position.y + 15.0);
+
+        // Update tooltip text
+        if let Ok(mut text) = text_query.get_single_mut() {
+            let display_name = format_location_name(location_id);
+            text.sections[0].value = format!(
+                "{}\nCoords: ({:.0}, {:.0})",
+                display_name,
+                tooltip.world_position.x,
+                tooltip.world_position.y
+            );
+        }
+    } else {
+        *visibility = Visibility::Hidden;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_format_location_name() {
+        assert_eq!(format_location_name("thornwood_hall"), "Thornwood Hall");
+        assert_eq!(format_location_name("central_crossroads"), "Central Crossroads");
+        assert_eq!(format_location_name("iron_mine"), "Iron Mine");
+    }
 
     #[test]
     fn test_world_bounds_contains() {
