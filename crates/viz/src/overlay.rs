@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use crate::agents::{AgentSelectedEvent, VisualAgent};
 use crate::camera::CameraController;
 use crate::director_state::DirectorState;
+use crate::live_commentary::AgentEventHistory;
 use crate::sim_runner::{SimRunner, SimStatus};
 use crate::state_loader::SimulationState;
 use crate::world::LocationPositions;
@@ -17,6 +18,7 @@ impl Plugin for OverlayPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PlaybackState>()
             .init_resource::<SelectedAgentInfo>()
+            .init_resource::<CommentaryHistory>()
             .add_systems(Startup, setup_overlay_ui)
             .add_systems(
                 Update,
@@ -29,9 +31,52 @@ impl Plugin for OverlayPlugin {
                     handle_playback_input,
                     update_agent_selection_info,
                     update_agent_info_panel,
+                    toggle_commentary_history,
+                    update_commentary_history_panel,
                 ),
             );
     }
+}
+
+/// Resource storing commentary history for scrollable viewing.
+#[derive(Resource)]
+pub struct CommentaryHistory {
+    /// All commentary items received (newest first).
+    pub items: VecDeque<HistoricalCommentary>,
+    /// Whether the history panel is visible.
+    pub panel_visible: bool,
+    /// Scroll offset for the history panel.
+    pub scroll_offset: usize,
+    /// Maximum items to keep.
+    pub max_items: usize,
+}
+
+impl Default for CommentaryHistory {
+    fn default() -> Self {
+        Self {
+            items: VecDeque::new(),
+            panel_visible: false,
+            scroll_offset: 0,
+            max_items: 100,
+        }
+    }
+}
+
+impl CommentaryHistory {
+    pub fn add(&mut self, item: HistoricalCommentary) {
+        self.items.push_front(item);
+        if self.items.len() > self.max_items {
+            self.items.pop_back();
+        }
+    }
+}
+
+/// A stored commentary item for history.
+#[derive(Clone)]
+pub struct HistoricalCommentary {
+    pub tick: u64,
+    pub content: String,
+    pub commentary_type: String,
 }
 
 /// Resource tracking playback state.
@@ -137,6 +182,14 @@ pub struct AgentInfoPanel;
 #[derive(Component)]
 pub struct AgentInfoText;
 
+/// Component marking the commentary history panel.
+#[derive(Component)]
+pub struct CommentaryHistoryPanel;
+
+/// Component marking the commentary history text content.
+#[derive(Component)]
+pub struct CommentaryHistoryText;
+
 /// System to set up the overlay UI structure.
 fn setup_overlay_ui(mut commands: Commands) {
     // Root UI node covering the entire screen
@@ -173,6 +226,9 @@ fn setup_overlay_ui(mut commands: Commands) {
 
     // Agent info panel (floating, top-right)
     spawn_agent_info_panel(&mut commands);
+
+    // Commentary history panel (floating, left side, hidden by default)
+    spawn_commentary_history_panel(&mut commands);
 
     tracing::info!("Overlay UI initialized");
 }
@@ -233,6 +289,68 @@ fn spawn_agent_info_panel(commands: &mut Commands) {
                     },
                 ),
                 AgentInfoText,
+            ));
+        });
+}
+
+/// Spawn the commentary history panel (floating panel on the left side).
+fn spawn_commentary_history_panel(commands: &mut Commands) {
+    commands
+        .spawn((
+            NodeBundle {
+                style: Style {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(50.0),
+                    left: Val::Px(10.0),
+                    width: Val::Px(350.0),
+                    max_height: Val::Percent(70.0),
+                    padding: UiRect::all(Val::Px(12.0)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                    overflow: Overflow::clip_y(),
+                    ..default()
+                },
+                background_color: Color::srgba(0.0, 0.0, 0.0, 0.9).into(),
+                visibility: Visibility::Hidden,
+                z_index: ZIndex::Global(50),
+                ..default()
+            },
+            CommentaryHistoryPanel,
+        ))
+        .with_children(|parent| {
+            // Panel title
+            parent.spawn(TextBundle::from_section(
+                "Commentary History [H to toggle, PgUp/PgDn to scroll]",
+                TextStyle {
+                    font_size: 14.0,
+                    color: Color::srgb(0.9, 0.8, 0.6),
+                    ..default()
+                },
+            ));
+
+            // Separator line
+            parent.spawn(NodeBundle {
+                style: Style {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(1.0),
+                    margin: UiRect::vertical(Val::Px(4.0)),
+                    ..default()
+                },
+                background_color: Color::srgb(0.4, 0.4, 0.4).into(),
+                ..default()
+            });
+
+            // Commentary history text (will be updated dynamically)
+            parent.spawn((
+                TextBundle::from_section(
+                    "(No commentary yet)",
+                    TextStyle {
+                        font_size: 13.0,
+                        color: Color::WHITE,
+                        ..default()
+                    },
+                ),
+                CommentaryHistoryText,
             ));
         });
 }
@@ -546,6 +664,7 @@ fn update_sim_status_display(
 fn update_commentary_display(
     mut commands: Commands,
     director: Res<DirectorState>,
+    mut history: ResMut<CommentaryHistory>,
     container_query: Query<Entity, With<CommentaryContainer>>,
     existing: Query<&DisplayedCommentary>,
     mut displayed_ids: Local<VecDeque<String>>,
@@ -565,6 +684,20 @@ fn update_commentary_display(
             continue;
         }
 
+        // Add to history for scrollable viewing
+        let type_name = match item.commentary_type {
+            director::CommentaryType::EventCaption => "Event",
+            director::CommentaryType::DramaticIrony => "Irony",
+            director::CommentaryType::ContextReminder => "Context",
+            director::CommentaryType::TensionTeaser => "Tension",
+            director::CommentaryType::NarratorVoice => "Narrator",
+        };
+        history.add(HistoricalCommentary {
+            tick: item.timestamp.tick,
+            content: item.content.clone(),
+            commentary_type: type_name.to_string(),
+        });
+
         // Determine style based on commentary type
         let (font_size, color, style_prefix) = match item.commentary_type {
             director::CommentaryType::EventCaption => (18.0, Color::WHITE, ""),
@@ -580,7 +713,7 @@ fn update_commentary_display(
             director::CommentaryType::NarratorVoice => (18.0, Color::srgb(1.0, 0.95, 0.8), ""),
         };
 
-        // Spawn commentary text
+        // Spawn commentary text with longer display time
         let text_entity = commands
             .spawn((
                 TextBundle::from_section(
@@ -597,7 +730,7 @@ fn update_commentary_display(
                 }),
                 DisplayedCommentary {
                     item_id: item.item_id.clone(),
-                    time_remaining: item.display_duration_ticks as f32 / 60.0, // Convert ticks to seconds
+                    time_remaining: (item.display_duration_ticks as f32 / 60.0).max(5.0), // At least 5 seconds
                     opacity: 1.0,
                 },
             ))
@@ -747,6 +880,7 @@ fn update_agent_selection_info(
 /// System to update the agent info panel display.
 fn update_agent_info_panel(
     selected_info: Res<SelectedAgentInfo>,
+    event_history: Res<AgentEventHistory>,
     mut panel_query: Query<&mut Visibility, With<AgentInfoPanel>>,
     mut text_query: Query<&mut Text, With<AgentInfoText>>,
 ) {
@@ -754,13 +888,12 @@ fn update_agent_info_panel(
         return;
     };
 
-    if selected_info.agent_id.is_some() {
+    if let Some(ref agent_id) = selected_info.agent_id {
         *panel_visibility = Visibility::Visible;
 
         // Update text content
         if let Ok(mut text) = text_query.get_single_mut() {
             let name = selected_info.name.as_deref().unwrap_or("Unknown");
-            let agent_id = selected_info.agent_id.as_deref().unwrap_or("???");
             let faction = selected_info.faction.as_deref().unwrap_or("None");
             let role = selected_info.role.as_deref().unwrap_or("Unknown");
             let location = selected_info
@@ -773,14 +906,71 @@ fn update_agent_info_panel(
                 .map(|p| format!("({:.0}, {:.0})", p.x, p.y))
                 .unwrap_or_else(|| "?".to_string());
 
+            // Build recent activity section from event history
+            let activity_section = if let Some(events) = event_history.get_history(agent_id) {
+                let activity_lines: Vec<String> = events
+                    .iter()
+                    .take(5) // Show last 5 events
+                    .map(|e| format_event_summary(e))
+                    .collect();
+                if activity_lines.is_empty() {
+                    "\n--- Recent Activity ---\n(No recent events)".to_string()
+                } else {
+                    format!("\n--- Recent Activity ---\n{}", activity_lines.join("\n"))
+                }
+            } else {
+                "\n--- Recent Activity ---\n(No recent events)".to_string()
+            };
+
+            // Build locations visited section
+            let locations_section = if let Some(events) = event_history.get_history(agent_id) {
+                let mut locations: Vec<String> = Vec::new();
+                for e in events.iter() {
+                    let loc = format_location_name(&e.location);
+                    if !locations.contains(&loc) && locations.len() < 5 {
+                        locations.push(loc);
+                    }
+                }
+                if locations.is_empty() {
+                    "\n--- Locations Visited ---\n(None recorded)".to_string()
+                } else {
+                    format!("\n--- Locations Visited ---\n{}", locations.join(", "))
+                }
+            } else {
+                "\n--- Locations Visited ---\n(None recorded)".to_string()
+            };
+
             text.sections[0].value = format!(
-                "Name: {}\nID: {}\nFaction: {}\nRole: {}\nLocation: {}\nCoords: {}",
-                name, agent_id, faction, role, location, coords
+                "Name: {}\nFaction: {}\nRole: {}\nLocation: {}\nCoords: {}{}{}",
+                name, faction, role, location, coords, activity_section, locations_section
             );
         }
     } else {
         *panel_visibility = Visibility::Hidden;
     }
+}
+
+/// Format an event into a short summary for the agent info panel.
+fn format_event_summary(event: &crate::live_commentary::SimEvent) -> String {
+    let action = match (event.event_type.as_str(), event.subtype.as_str()) {
+        ("movement", "travel") => format!("Traveled to {}", format_location_name(&event.location)),
+        ("communication", "share_memory") => {
+            if let Some(ref target) = event.secondary_agent_name {
+                format!("Spoke with {}", target)
+            } else {
+                "Shared information".to_string()
+            }
+        }
+        ("social", "express_loyalty") => "Expressed loyalty".to_string(),
+        ("social", "express_doubt") => "Expressed doubts".to_string(),
+        ("conflict", subtype) => format!("Conflict: {}", subtype),
+        ("faction", "defection") => "Defected!".to_string(),
+        ("resource", "work") => "Worked".to_string(),
+        ("resource", subtype) => format!("Resource: {}", subtype),
+        ("ritual", _) => "Participated in ritual".to_string(),
+        (event_type, subtype) => format!("{}: {}", event_type, subtype),
+    };
+    format!("[T{}] {}", event.tick, action)
 }
 
 /// Format a location ID into a human-readable display name.
@@ -796,6 +986,79 @@ fn format_location_name(location_id: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// System to toggle commentary history panel visibility and handle scrolling.
+fn toggle_commentary_history(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut history: ResMut<CommentaryHistory>,
+    mut panel_query: Query<&mut Visibility, With<CommentaryHistoryPanel>>,
+) {
+    // Toggle visibility with H key
+    if keyboard.just_pressed(KeyCode::KeyH) {
+        history.panel_visible = !history.panel_visible;
+    }
+
+    // Scroll with PageUp/PageDown
+    if history.panel_visible {
+        if keyboard.just_pressed(KeyCode::PageUp) {
+            history.scroll_offset = history.scroll_offset.saturating_add(5);
+        }
+        if keyboard.just_pressed(KeyCode::PageDown) {
+            history.scroll_offset = history.scroll_offset.saturating_sub(5);
+        }
+        // Clamp scroll offset
+        let max_scroll = history.items.len().saturating_sub(10);
+        history.scroll_offset = history.scroll_offset.min(max_scroll);
+    }
+
+    // Update panel visibility
+    for mut visibility in panel_query.iter_mut() {
+        *visibility = if history.panel_visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+/// System to update the commentary history panel text.
+fn update_commentary_history_panel(
+    history: Res<CommentaryHistory>,
+    mut text_query: Query<&mut Text, With<CommentaryHistoryText>>,
+) {
+    if !history.panel_visible {
+        return;
+    }
+
+    let Ok(mut text) = text_query.get_single_mut() else {
+        return;
+    };
+
+    if history.items.is_empty() {
+        text.sections[0].value = "(No commentary yet)\n\nPress H to hide this panel.".to_string();
+        return;
+    }
+
+    // Build text from visible items (showing ~15 items at a time)
+    let visible_items: Vec<String> = history
+        .items
+        .iter()
+        .skip(history.scroll_offset)
+        .take(15)
+        .map(|item| {
+            format!("[T{:>4}] [{}] {}", item.tick, item.commentary_type, item.content)
+        })
+        .collect();
+
+    let scroll_info = format!(
+        "\n--- Showing {}-{} of {} ---",
+        history.scroll_offset + 1,
+        (history.scroll_offset + visible_items.len()).min(history.items.len()),
+        history.items.len()
+    );
+
+    text.sections[0].value = format!("{}{}", visible_items.join("\n"), scroll_info);
 }
 
 #[cfg(test)]
