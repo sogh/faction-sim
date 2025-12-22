@@ -14,6 +14,7 @@ use crate::actions::faction::{FactionAction, FactionActionType};
 use crate::actions::conflict::{ConflictAction, ConflictActionType, conflict_weights};
 use crate::actions::beer::{BeerAction, BeerActionType, beer_weights};
 use crate::components::agent::{AgentId, AgentName, Alive, Goals, GoalType, Intoxication, Needs, Role, SocialBelonging, Traits};
+use crate::components::needs::PhysicalNeeds;
 use crate::components::social::{Memory, MemoryBank, MemorySource, MemoryValence, RelationshipGraph};
 use crate::components::world::{Position, WorldState};
 use crate::events::types::{
@@ -869,6 +870,45 @@ pub fn execute_resource_actions(
                 );
                 tick_events.push(event);
             }
+            ResourceActionType::Consume => {
+                // Consume resources from faction stores to satisfy a need
+                // The need name is stored in target_id
+                let need_name = action.target_id.as_deref().unwrap_or("hunger");
+
+                // Deduct resources from faction
+                let consumed = if let Some(faction) = faction_registry.get_mut(&actor_faction) {
+                    match need_name {
+                        "hunger" => {
+                            if faction.resources.grain >= action.amount {
+                                faction.resources.grain -= action.amount;
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        // Other needs don't consume faction resources directly
+                        // (warmth uses shelter, thirst uses water sources, etc.)
+                        _ => true,
+                    }
+                } else {
+                    false
+                };
+
+                if consumed {
+                    let event = create_resource_event(
+                        &mut tick_events,
+                        &world_state,
+                        &actor_id,
+                        &actor_name,
+                        &actor_faction,
+                        &location,
+                        ResourceSubtype::Consume,
+                        action.amount,
+                        Some(need_name),
+                    );
+                    tick_events.push(event);
+                }
+            }
         }
     }
 }
@@ -904,6 +944,7 @@ fn create_resource_event(
         ResourceSubtype::Trade => ("mutual_exchange", 0.2),
         ResourceSubtype::Steal => ("theft", 0.5),
         ResourceSubtype::Hoard => ("self_interest", 0.3),
+        ResourceSubtype::Consume => ("satisfying_needs", 0.05),
         _ => ("resource_action", 0.1),
     };
 

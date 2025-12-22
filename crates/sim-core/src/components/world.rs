@@ -84,6 +84,233 @@ impl LocationResources {
     }
 }
 
+/// Types of production available at a location
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProductionType {
+    /// Harvest grain from fields
+    Harvest,
+    /// Hunt for meat and hides
+    Hunt,
+    /// Gather wood from forest
+    GatherWood,
+    /// Gather herbs from forest
+    GatherHerbs,
+    /// Fetch water
+    FetchWater,
+    /// Brew beer
+    Brew,
+    /// Preserve food
+    Preserve,
+    /// Mine iron or salt
+    Mine,
+    /// Fish from harbor
+    Fish,
+}
+
+/// Benefits that a location provides for agent decision-making
+///
+/// This struct defines what needs can be satisfied at a location and
+/// what production activities are available, enabling desire-based
+/// action generation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LocationBenefits {
+    /// Does this location provide shelter (reduces warmth need)?
+    pub provides_shelter: bool,
+    /// Does this location have access to faction food stores?
+    pub has_food_stores: bool,
+    /// Does this location have water access?
+    pub has_water: bool,
+    /// Social hub rating (0.0-1.0) - how good for building belonging
+    pub social_hub_rating: f32,
+    /// Production types available at this location
+    pub production_types: Vec<ProductionType>,
+    /// Is this location a faction HQ (ritual attendance possible)?
+    pub is_faction_hq: bool,
+    /// Safety rating (0.0-1.0) - how defensible
+    pub safety_rating: f32,
+    /// Rest quality (0.0-1.0) - how well agents can rest here
+    pub rest_quality: f32,
+}
+
+impl LocationBenefits {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create benefits for a faction hall (HQ)
+    pub fn hall() -> Self {
+        Self {
+            provides_shelter: true,
+            has_food_stores: true,
+            has_water: true,
+            social_hub_rating: 0.8,
+            production_types: vec![ProductionType::Brew, ProductionType::Preserve],
+            is_faction_hq: true,
+            safety_rating: 0.7,
+            rest_quality: 0.8,
+        }
+    }
+
+    /// Create benefits for a village
+    pub fn village() -> Self {
+        Self {
+            provides_shelter: true,
+            has_food_stores: true,
+            has_water: true,
+            social_hub_rating: 0.5,
+            production_types: vec![ProductionType::Brew, ProductionType::Preserve],
+            is_faction_hq: false,
+            safety_rating: 0.5,
+            rest_quality: 0.6,
+        }
+    }
+
+    /// Create benefits for agricultural fields
+    pub fn fields() -> Self {
+        Self {
+            provides_shelter: false,
+            has_food_stores: false,
+            has_water: false,
+            social_hub_rating: 0.2,
+            production_types: vec![ProductionType::Harvest],
+            is_faction_hq: false,
+            safety_rating: 0.2,
+            rest_quality: 0.2,
+        }
+    }
+
+    /// Create benefits for a forest
+    pub fn forest() -> Self {
+        Self {
+            provides_shelter: false,
+            has_food_stores: false,
+            has_water: false,
+            social_hub_rating: 0.1,
+            production_types: vec![
+                ProductionType::Hunt,
+                ProductionType::GatherWood,
+                ProductionType::GatherHerbs,
+            ],
+            is_faction_hq: false,
+            safety_rating: 0.3,
+            rest_quality: 0.3,
+        }
+    }
+
+    /// Create benefits for a mine
+    pub fn mine() -> Self {
+        Self {
+            provides_shelter: false,
+            has_food_stores: false,
+            has_water: false,
+            social_hub_rating: 0.1,
+            production_types: vec![ProductionType::Mine],
+            is_faction_hq: false,
+            safety_rating: 0.4,
+            rest_quality: 0.1,
+        }
+    }
+
+    /// Create benefits for a harbor
+    pub fn harbor() -> Self {
+        Self {
+            provides_shelter: false,
+            has_food_stores: false,
+            has_water: true,
+            social_hub_rating: 0.4,
+            production_types: vec![ProductionType::Fish, ProductionType::Mine],
+            is_faction_hq: false,
+            safety_rating: 0.3,
+            rest_quality: 0.3,
+        }
+    }
+
+    /// Create benefits for a market
+    pub fn market() -> Self {
+        Self {
+            provides_shelter: false,
+            has_food_stores: false,
+            has_water: true,
+            social_hub_rating: 0.6,
+            production_types: vec![],
+            is_faction_hq: false,
+            safety_rating: 0.4,
+            rest_quality: 0.3,
+        }
+    }
+
+    /// Create benefits for a crossroads
+    pub fn crossroads() -> Self {
+        Self {
+            provides_shelter: false,
+            has_food_stores: false,
+            has_water: false,
+            social_hub_rating: 0.3,
+            production_types: vec![],
+            is_faction_hq: false,
+            safety_rating: 0.2,
+            rest_quality: 0.2,
+        }
+    }
+
+    /// Create benefits for a watchtower
+    pub fn watchtower() -> Self {
+        Self {
+            provides_shelter: true,
+            has_food_stores: false,
+            has_water: false,
+            social_hub_rating: 0.2,
+            production_types: vec![],
+            is_faction_hq: false,
+            safety_rating: 0.8,
+            rest_quality: 0.4,
+        }
+    }
+
+    /// Create benefits for a bridge
+    pub fn bridge() -> Self {
+        Self {
+            provides_shelter: false,
+            has_food_stores: false,
+            has_water: true,
+            social_hub_rating: 0.2,
+            production_types: vec![ProductionType::FetchWater, ProductionType::Fish],
+            is_faction_hq: false,
+            safety_rating: 0.3,
+            rest_quality: 0.2,
+        }
+    }
+
+    /// Check if this location can satisfy a particular need
+    pub fn can_satisfy_need(&self, need: &str) -> bool {
+        match need {
+            "hunger" => self.has_food_stores,
+            "thirst" => self.has_water,
+            "warmth" => self.provides_shelter,
+            "rest" => self.rest_quality > 0.4,
+            "safety" => self.safety_rating > 0.5,
+            "belonging" => self.social_hub_rating > 0.3 || self.is_faction_hq,
+            _ => false,
+        }
+    }
+
+    /// Get the satisfaction amount for a need at this location
+    pub fn need_satisfaction_amount(&self, need: &str) -> f32 {
+        match need {
+            "hunger" => if self.has_food_stores { 0.4 } else { 0.0 },
+            "thirst" => if self.has_water { 0.5 } else { 0.0 },
+            "warmth" => if self.provides_shelter { 0.6 } else { 0.0 },
+            "rest" => self.rest_quality * 0.5,
+            "safety" => self.safety_rating * 0.4,
+            "belonging" => {
+                let base = self.social_hub_rating * 0.3;
+                if self.is_faction_hq { base + 0.2 } else { base }
+            },
+            _ => 0.0,
+        }
+    }
+}
+
 /// A location in the world
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Location {
@@ -101,6 +328,8 @@ pub struct Location {
     pub resources: LocationResources,
     /// Adjacent location IDs (for movement)
     pub adjacent: Vec<String>,
+    /// Benefits this location provides for agent decision-making
+    pub benefits: LocationBenefits,
 }
 
 impl Location {
@@ -109,6 +338,20 @@ impl Location {
         name: impl Into<String>,
         location_type: LocationType,
     ) -> Self {
+        // Set default benefits based on location type
+        let benefits = match location_type {
+            LocationType::Hall => LocationBenefits::hall(),
+            LocationType::Village => LocationBenefits::village(),
+            LocationType::Fields => LocationBenefits::fields(),
+            LocationType::Forest => LocationBenefits::forest(),
+            LocationType::Mine => LocationBenefits::mine(),
+            LocationType::Harbor => LocationBenefits::harbor(),
+            LocationType::Market => LocationBenefits::market(),
+            LocationType::Crossroads => LocationBenefits::crossroads(),
+            LocationType::Watchtower => LocationBenefits::watchtower(),
+            LocationType::Bridge => LocationBenefits::bridge(),
+        };
+
         Self {
             id: id.into(),
             name: name.into(),
@@ -117,6 +360,7 @@ impl Location {
             properties: Vec::new(),
             resources: LocationResources::default(),
             adjacent: Vec::new(),
+            benefits,
         }
     }
 
@@ -137,6 +381,11 @@ impl Location {
 
     pub fn with_adjacent(mut self, adjacent: Vec<String>) -> Self {
         self.adjacent = adjacent;
+        self
+    }
+
+    pub fn with_benefits(mut self, benefits: LocationBenefits) -> Self {
+        self.benefits = benefits;
         self
     }
 

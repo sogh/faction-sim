@@ -283,6 +283,11 @@ fn calculate_resource_modifier(
             // Low honesty helps justify hoarding
             modifier *= 1.0 + (1.0 - traits.honesty) * 0.3;
         }
+        ResourceActionType::Consume => {
+            // Consumption is needs-driven, minimal trait influence
+            // Just a slight boost for less loyal agents (more self-focused)
+            modifier *= 0.9 + (1.0 - traits.loyalty_weight) * 0.2;
+        }
     }
 
     modifier.max(0.1)

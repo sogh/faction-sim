@@ -130,6 +130,8 @@ pub enum ResourceSubtype {
     Steal,
     Hoard,
     Work,
+    /// Consuming resources to satisfy a need (eating, drinking, etc.)
+    Consume,
 }
 
 /// Death event subtypes

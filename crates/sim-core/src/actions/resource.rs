@@ -15,14 +15,32 @@ pub enum ResourceActionType {
     Steal,
     /// Hoard personal reserves instead of contributing to faction
     Hoard,
+    /// Consume resources to satisfy a need (eat, drink, etc.)
+    Consume,
 }
 
-/// Resource type for trading/stealing
+/// Resource type for trading/stealing/consuming
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResourceType {
     Grain,
     Iron,
     Salt,
+    Water,
+    Wood,
+    /// Generic food consumption (uses grain from faction stores)
+    Food,
+}
+
+impl ResourceType {
+    /// Create a resource type from a need name
+    pub fn from_need(need: &str) -> Option<Self> {
+        match need {
+            "hunger" => Some(Self::Food),
+            "thirst" => Some(Self::Water),
+            "warmth" => Some(Self::Wood), // Fuel for warmth
+            _ => None,
+        }
+    }
 }
 
 /// A resource action
@@ -89,6 +107,24 @@ impl ResourceAction {
             action_type: ResourceActionType::Hoard,
             target_id: None,
             resource_type: None,
+            amount,
+        }
+    }
+
+    /// Create a consume action to satisfy a need
+    ///
+    /// The need_name is used to determine which resource type to consume:
+    /// - "hunger" -> Food (uses grain)
+    /// - "thirst" -> Water
+    /// - "warmth" -> Wood (fuel)
+    pub fn consume(actor_id: impl Into<String>, need_name: impl Into<String>, amount: u32) -> Self {
+        let need = need_name.into();
+        let resource_type = ResourceType::from_need(&need);
+        Self {
+            actor_id: actor_id.into(),
+            action_type: ResourceActionType::Consume,
+            target_id: Some(need), // Store the need name for execution
+            resource_type,
             amount,
         }
     }

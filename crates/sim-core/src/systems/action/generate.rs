@@ -1,6 +1,10 @@
 //! Action Generation System
 //!
 //! Generates valid actions for each agent based on their state and surroundings.
+//!
+//! The desire-based system generates action desires for all known locations,
+//! weighted by expected utility. Movement emerges from agents wanting to
+//! perform actions at specific locations.
 
 use bevy_ecs::prelude::*;
 use std::collections::HashMap;
@@ -15,10 +19,13 @@ use crate::actions::conflict::{ConflictAction, ConflictActionType, conflict_weig
 use crate::actions::beer::{BeerAction, BeerActionType, beer_weights};
 use crate::components::agent::{AgentId, AgentName, FoodSecurity, Goals, GoalType, Intoxication, Needs, Role, SocialBelonging, Traits};
 use crate::components::faction::{FactionMembership, FactionRegistry};
+use crate::components::needs::PhysicalNeeds;
 use crate::components::social::{MemoryBank, MemoryValence, RelationshipGraph};
-use crate::components::world::{LocationRegistry, Position};
+use crate::components::world::{Location, LocationBenefits, LocationRegistry, Position, ProductionType};
 use crate::systems::perception::AgentsByLocation;
 use crate::systems::memory::get_most_interesting_memory;
+
+use super::utility::{self, ActionUtility, calculate_distance_penalty, calculate_idle_weight, calculate_need_utility};
 
 /// Enum representing all possible actions an agent can take
 #[derive(Debug, Clone)]
@@ -93,85 +100,394 @@ impl PendingActions {
     }
 }
 
-/// System to generate movement actions for each agent
-pub fn generate_movement_actions(
+/// System to generate desire-based actions for all known locations
+///
+/// This replaces the old movement generator. Instead of generating random
+/// movement and explicit "return home" actions, we generate actions based
+/// on what agents WANT to do, and movement emerges from those desires.
+///
+/// Agents generate desires for actions at ALL known locations, weighted by:
+/// - Need satisfaction (how much does this reduce urgent needs?)
+/// - Social gain (faction standing, relationships)
+/// - Faction benefit (resource production)
+/// - Distance cost (farther = lower weight)
+pub fn generate_desire_based_actions(
     location_registry: Res<LocationRegistry>,
     faction_registry: Res<FactionRegistry>,
     mut pending_actions: ResMut<PendingActions>,
-    query: Query<(&AgentId, &Position, &FactionMembership, &Needs)>,
+    query: Query<(&AgentId, &Position, &FactionMembership, &Needs, &PhysicalNeeds, &Traits)>,
 ) {
-    for (agent_id, position, membership, needs) in query.iter() {
-        // Get current location and its adjacencies
-        let Some(current_location) = location_registry.get(&position.location_id) else {
-            continue;
-        };
+    for (agent_id, position, membership, needs, physical_needs, traits) in query.iter() {
+        let current_location_id = &position.location_id;
 
-        let adjacent_locations = location_registry.get_adjacent(&position.location_id);
+        // Get locations this agent knows about
+        let known_locations = get_known_locations(
+            current_location_id,
+            membership,
+            &faction_registry,
+            &location_registry,
+        );
 
-        // Generate move actions for each adjacent location
-        for adjacent_id in &adjacent_locations {
-            let action = MoveAction::travel(&agent_id.0, adjacent_id);
+        // Generate desires for each known location
+        for target_location_id in &known_locations {
+            let Some(target_location) = location_registry.get(target_location_id) else {
+                continue;
+            };
+
+            // Calculate distance penalty once per location
+            let distance_penalty = calculate_distance_penalty(
+                current_location_id,
+                target_location_id,
+                &location_registry,
+                traits.boldness,
+            );
+
+            // Generate consumption desires (eat, drink, rest, warm up)
+            generate_consumption_desires(
+                &agent_id.0,
+                current_location_id,
+                target_location,
+                physical_needs,
+                traits,
+                distance_penalty,
+                &location_registry,
+                &mut pending_actions,
+            );
+
+            // Generate production desires (harvest, hunt, gather)
+            generate_production_desires(
+                &agent_id.0,
+                current_location_id,
+                target_location,
+                needs,
+                physical_needs,
+                traits,
+                membership,
+                distance_penalty,
+                &location_registry,
+                &mut pending_actions,
+            );
+
+            // Generate social/belonging desires (ritual attendance, social hub)
+            generate_belonging_desires(
+                &agent_id.0,
+                current_location_id,
+                target_location,
+                needs,
+                physical_needs,
+                traits,
+                membership,
+                distance_penalty,
+                &location_registry,
+                &mut pending_actions,
+            );
+        }
+
+        // Always add a small weight for adjacent exploration
+        for adjacent_id in location_registry.get_adjacent(current_location_id) {
             pending_actions.add(
                 &agent_id.0,
                 WeightedAction::new(
-                    Action::Move(action),
-                    0.1, // Base weight for random movement
-                    format!("travel to {}", adjacent_id),
+                    Action::Move(MoveAction::travel(&agent_id.0, &adjacent_id)),
+                    0.05 * (0.5 + traits.boldness * 0.5), // Bold agents explore more
+                    format!("explore {}", adjacent_id),
                 ),
             );
         }
 
-        // Generate return home action if not at HQ
-        if let Some(faction) = faction_registry.get(&membership.faction_id) {
-            if position.location_id != faction.hq_location {
-                // Check if path to HQ exists (simplified: check if HQ is adjacent or reachable)
-                let can_reach_hq = adjacent_locations.contains(&faction.hq_location)
-                    || location_registry.path_exists(&position.location_id, &faction.hq_location);
-
-                if can_reach_hq {
-                    // Find next step toward HQ
-                    let next_step = if adjacent_locations.contains(&faction.hq_location) {
-                        faction.hq_location.clone()
-                    } else {
-                        // Get first step on path to HQ
-                        location_registry
-                            .next_step_toward(&position.location_id, &faction.hq_location)
-                            .unwrap_or_else(|| adjacent_locations.first().cloned().unwrap_or_default())
-                    };
-
-                    if !next_step.is_empty() {
-                        let action = MoveAction::return_home(&agent_id.0, &next_step);
-                        let weight = if needs.social_belonging == SocialBelonging::Isolated {
-                            0.5 // Higher weight if isolated
-                        } else if needs.social_belonging == SocialBelonging::Peripheral {
-                            0.3
-                        } else {
-                            0.1
-                        };
-
-                        pending_actions.add(
-                            &agent_id.0,
-                            WeightedAction::new(
-                                Action::Move(action),
-                                weight,
-                                "return to faction HQ",
-                            ),
-                        );
-                    }
-                }
-            }
-        }
-
-        // Always add idle option
+        // Idle action with need-based penalty
+        let idle_weight = calculate_idle_weight(physical_needs);
         pending_actions.add(
             &agent_id.0,
-            WeightedAction::new(
-                Action::Idle,
-                0.2, // Base idle weight
-                "stay put",
-            ),
+            WeightedAction::new(Action::Idle, idle_weight, "wait and observe"),
         );
     }
+}
+
+/// Get locations an agent knows about and might travel to
+fn get_known_locations(
+    current: &str,
+    membership: &FactionMembership,
+    faction_registry: &FactionRegistry,
+    location_registry: &LocationRegistry,
+) -> Vec<String> {
+    let mut locations = Vec::new();
+
+    // Own faction territory (always known)
+    if let Some(faction) = faction_registry.get(&membership.faction_id) {
+        locations.extend(faction.territory.iter().cloned());
+    }
+
+    // Adjacent locations (visible from current position)
+    locations.extend(location_registry.get_adjacent(current));
+
+    // Current location
+    if !locations.contains(&current.to_string()) {
+        locations.push(current.to_string());
+    }
+
+    // Deduplicate
+    locations.sort();
+    locations.dedup();
+
+    locations
+}
+
+/// Generate consumption desires for a target location
+///
+/// If the agent has unmet needs (hunger, thirst, warmth, rest) and the
+/// location can satisfy them, generate either a consumption action (if at
+/// location) or a travel action toward it.
+fn generate_consumption_desires(
+    agent_id: &str,
+    current_location: &str,
+    target_location: &Location,
+    physical_needs: &PhysicalNeeds,
+    traits: &Traits,
+    distance_penalty: f32,
+    location_registry: &LocationRegistry,
+    pending_actions: &mut PendingActions,
+) {
+    let benefits = &target_location.benefits;
+    let at_location = current_location == target_location.id;
+
+    // Check each need that this location can satisfy
+    let needs_to_check = [
+        ("hunger", benefits.has_food_stores),
+        ("thirst", benefits.has_water),
+        ("warmth", benefits.provides_shelter),
+        ("rest", benefits.rest_quality > 0.4),
+    ];
+
+    for (need_name, can_satisfy) in needs_to_check {
+        if !can_satisfy {
+            continue;
+        }
+
+        let satisfaction = benefits.need_satisfaction_amount(need_name);
+        let utility = calculate_need_utility(need_name, satisfaction, physical_needs);
+
+        if utility < 0.01 {
+            continue; // Need is satisfied, skip
+        }
+
+        let total_utility = utility * distance_penalty;
+
+        if at_location {
+            // At location: generate consumption action
+            let action = ResourceAction::consume(agent_id, need_name, 1);
+            pending_actions.add(
+                agent_id,
+                WeightedAction::new(
+                    Action::Resource(action),
+                    total_utility,
+                    format!("satisfy {} at {}", need_name, target_location.name),
+                ),
+            );
+        } else {
+            // Not at location: generate travel toward it
+            if let Some(next_step) = location_registry.next_step_toward(current_location, &target_location.id) {
+                pending_actions.add(
+                    agent_id,
+                    WeightedAction::new(
+                        Action::Move(MoveAction::travel(agent_id, &next_step)),
+                        total_utility,
+                        format!("travel toward {} to satisfy {}", target_location.name, need_name),
+                    ),
+                );
+            }
+        }
+    }
+}
+
+/// Generate production desires for a target location
+///
+/// If the location has production opportunities (harvest, hunt, etc.),
+/// generate actions for agents to contribute to faction resources.
+fn generate_production_desires(
+    agent_id: &str,
+    current_location: &str,
+    target_location: &Location,
+    needs: &Needs,
+    physical_needs: &PhysicalNeeds,
+    traits: &Traits,
+    membership: &FactionMembership,
+    distance_penalty: f32,
+    location_registry: &LocationRegistry,
+    pending_actions: &mut PendingActions,
+) {
+    let benefits = &target_location.benefits;
+    let at_location = current_location == target_location.id;
+
+    // Only generate production for faction-controlled locations
+    if target_location.controlling_faction.as_ref() != Some(&membership.faction_id) {
+        return;
+    }
+
+    for prod_type in &benefits.production_types {
+        let mut utility = ActionUtility::new();
+
+        // Base faction contribution benefit
+        utility.faction_benefit = 0.3 * utility::weights::FACTION;
+
+        // Loyalty increases production desire
+        utility.faction_benefit *= 0.5 + traits.loyalty_weight * 0.5;
+
+        // Indirect need satisfaction (producing food helps hunger long-term)
+        match prod_type {
+            ProductionType::Harvest | ProductionType::Hunt | ProductionType::Fish => {
+                let hunger_urgency = physical_needs.hunger.status().urgency_weight();
+                utility.need_satisfaction = 0.15 * hunger_urgency * utility::weights::NEED;
+            }
+            ProductionType::GatherWood => {
+                let warmth_urgency = physical_needs.warmth.status().urgency_weight();
+                utility.need_satisfaction = 0.1 * warmth_urgency * utility::weights::NEED;
+            }
+            ProductionType::FetchWater => {
+                let thirst_urgency = physical_needs.thirst.status().urgency_weight();
+                utility.need_satisfaction = 0.15 * thirst_urgency * utility::weights::NEED;
+            }
+            _ => {}
+        }
+
+        // Food security affects work motivation
+        if needs.food_security == FoodSecurity::Stressed {
+            utility.faction_benefit *= 1.3;
+        } else if needs.food_security == FoodSecurity::Desperate {
+            utility.faction_benefit *= 1.6;
+        }
+
+        utility.distance_cost = distance_penalty;
+        let total = utility.total();
+
+        if total < 0.01 {
+            continue;
+        }
+
+        if at_location {
+            // At location: generate work action
+            let action = ResourceAction::work(agent_id);
+            pending_actions.add(
+                agent_id,
+                WeightedAction::new(
+                    Action::Resource(action),
+                    total,
+                    format!("{:?} at {}", prod_type, target_location.name),
+                ),
+            );
+        } else {
+            // Not at location: generate travel toward it
+            if let Some(next_step) = location_registry.next_step_toward(current_location, &target_location.id) {
+                pending_actions.add(
+                    agent_id,
+                    WeightedAction::new(
+                        Action::Move(MoveAction::travel(agent_id, &next_step)),
+                        total,
+                        format!("travel to {} for {:?}", target_location.name, prod_type),
+                    ),
+                );
+            }
+        }
+    }
+}
+
+/// Generate belonging/social desires for a target location
+///
+/// Agents with low social belonging are drawn to social hubs and faction HQs
+/// for ritual attendance and social interaction.
+fn generate_belonging_desires(
+    agent_id: &str,
+    current_location: &str,
+    target_location: &Location,
+    needs: &Needs,
+    physical_needs: &PhysicalNeeds,
+    traits: &Traits,
+    membership: &FactionMembership,
+    distance_penalty: f32,
+    location_registry: &LocationRegistry,
+    pending_actions: &mut PendingActions,
+) {
+    let benefits = &target_location.benefits;
+    let at_location = current_location == target_location.id;
+
+    // Only generate for locations with social value
+    if benefits.social_hub_rating < 0.2 && !benefits.is_faction_hq {
+        return;
+    }
+
+    // Only go to faction HQ for your own faction
+    if benefits.is_faction_hq {
+        if target_location.controlling_faction.as_ref() != Some(&membership.faction_id) {
+            return;
+        }
+    }
+
+    let mut utility = ActionUtility::new();
+
+    // Belonging need satisfaction
+    let belonging_satisfaction = benefits.need_satisfaction_amount("belonging");
+    utility.need_satisfaction = calculate_need_utility("belonging", belonging_satisfaction, physical_needs);
+
+    // Social benefit from being at a social hub
+    utility.social_gain = benefits.social_hub_rating * utility::weights::SOCIAL;
+
+    // Sociable agents value social locations more
+    utility.social_gain *= 0.5 + traits.sociability * 0.5;
+
+    // Isolated agents strongly desire faction HQ
+    if benefits.is_faction_hq && needs.social_belonging == SocialBelonging::Isolated {
+        utility.social_gain *= 2.0;
+    } else if benefits.is_faction_hq && needs.social_belonging == SocialBelonging::Peripheral {
+        utility.social_gain *= 1.5;
+    }
+
+    // Ritual attendance at HQ is valuable for learning and belonging
+    if benefits.is_faction_hq {
+        utility.goal_advancement = 0.2 * utility::weights::GOAL; // Learning benefit
+    }
+
+    utility.distance_cost = distance_penalty;
+    let total = utility.total();
+
+    if total < 0.05 {
+        return;
+    }
+
+    if at_location {
+        // At location: the social benefit is already captured by other systems
+        // (communication actions, ritual attendance, etc.)
+        // Just add a small "stay here" preference
+        pending_actions.add(
+            agent_id,
+            WeightedAction::new(
+                Action::Idle,
+                total * 0.3, // Reduced weight since we're just staying
+                format!("socialize at {}", target_location.name),
+            ),
+        );
+    } else {
+        // Not at location: generate travel toward it
+        if let Some(next_step) = location_registry.next_step_toward(current_location, &target_location.id) {
+            pending_actions.add(
+                agent_id,
+                WeightedAction::new(
+                    Action::Move(MoveAction::travel(agent_id, &next_step)),
+                    total,
+                    format!("travel to {} for social/belonging", target_location.name),
+                ),
+            );
+        }
+    }
+}
+
+// Keep the old function name as an alias for backwards compatibility during transition
+pub fn generate_movement_actions(
+    location_registry: Res<LocationRegistry>,
+    faction_registry: Res<FactionRegistry>,
+    mut pending_actions: ResMut<PendingActions>,
+    query: Query<(&AgentId, &Position, &FactionMembership, &Needs, &PhysicalNeeds, &Traits)>,
+) {
+    generate_desire_based_actions(location_registry, faction_registry, pending_actions, query);
 }
 
 /// System to generate patrol actions for scouts

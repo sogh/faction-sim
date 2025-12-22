@@ -175,6 +175,7 @@ fn get_base_score(event: &Event) -> f32 {
             ResourceSubtype::Hoard => base_scores::RESOURCE_HOARD,
             ResourceSubtype::Acquire => 0.1,
             ResourceSubtype::Lose => 0.2,
+            ResourceSubtype::Consume => 0.05, // Low drama - just satisfying needs
         },
         EventSubtype::Cooperation(c) => match c {
             CooperationSubtype::BuildTrust => base_scores::SOCIAL_BUILD_TRUST,
